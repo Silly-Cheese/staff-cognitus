@@ -1,0 +1,46 @@
+name: Finalize Cognitus Command Generation 3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-generation-3.yml'
+      - 'scripts/finalize-generation-3.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Finalize Generation 3
+        run: python scripts/finalize-generation-3.py
+
+      - name: Verify JavaScript syntax
+        run: node --check src/generation3.js
+
+      - name: Verify security hardening
+        run: |
+          grep -q 'batch.update(g3.Fire.doc(g3.db, "users", requestRecord.applicantUid)' src/generation3.js
+          grep -q "request.resource.data.status in \['draft', 'pending_approval'\]" firestore.command.g3.rules.fragment
+          grep -q "request.resource.data.status in \['draft', 'pending_approval', 'published', 'closed'\]" firestore.command.g3.rules.fragment
+          grep -q 'request.resource.data.approvedByUid == resource.data.approvedByUid' firestore.command.g3.rules.fragment
+
+      - name: Commit finalization
+        run: |
+          if git diff --quiet; then
+            echo 'Generation 3 is already finalized.'
+            exit 0
+          fi
+          git config user.name 'Cognitus Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/generation3.js firestore.command.g3.rules.fragment
+          git commit -m 'Finalize Cognitus Command generation 3'
+          git push
