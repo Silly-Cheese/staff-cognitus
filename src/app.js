@@ -91,7 +91,10 @@ function canAny(permissions) {
 }
 
 function canManageStaff() {
-  return isMainOwner() || canAny([PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE]);
+  // Generation 1's Staff Administration surface provisions accounts. Broader
+  // HR employee-management controls arrive in Generation 2, so only explicit
+  // provisioners (and the Cognitus Owner) should see this page today.
+  return isMainOwner() || can(PERMISSIONS.STAFF_PROVISION);
 }
 
 function currentDepartment() {
@@ -775,7 +778,10 @@ async function renderRoute() {
   document.body.classList.remove("sidebar-open");
   const current = route();
   if (!state.authUser) return loginPage();
-  if (current === "/login") location.hash = "#/dashboard";
+  if (current === "/login") {
+    location.hash = "#/dashboard";
+    return;
+  }
   if (!state.userRecord) return accessDeniedPage("Cognitus account unavailable", "No Cognitus account record is associated with this authenticated session.");
   if (!state.staffAccess) return isMainOwner() ? ownerBootstrapPage() : accessDeniedPage("Staff access required", "This Cognitus account has not been provisioned for the internal portal.");
   if (!isActiveStaff(state.staffAccess)) return accessDeniedPage("Staff access unavailable", `Your current staff status is ${statusLabel(state.staffAccess.status)}.`);
