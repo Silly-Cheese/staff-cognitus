@@ -431,6 +431,7 @@ match /commandPrItems/{itemId} {
   allow create: if (isOwner() || staffPermission('pr.manage'))
     && commandG3ValidPrItem(request.resource.data, itemId)
     && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.status in ['draft', 'pending_approval']
     && request.resource.data.approvedByUid == null
     && request.resource.data.approvedAt == null
     && request.resource.data.createdAt == request.time
@@ -442,6 +443,9 @@ match /commandPrItems/{itemId} {
     && request.resource.data.cognitusId == resource.data.cognitusId
     && request.resource.data.createdByUid == resource.data.createdByUid
     && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.status in ['draft', 'pending_approval', 'published', 'closed']
+    && request.resource.data.approvedByUid == resource.data.approvedByUid
+    && request.resource.data.approvedAt == resource.data.approvedAt
     && request.resource.data.updatedAt == request.time
     && request.resource.data.diff(resource.data).changedKeys().hasOnly([
       'type', 'title', 'status', 'body', 'url', 'ownerUid', 'updatedAt'

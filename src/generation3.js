@@ -510,7 +510,27 @@ async function organizationsPage() {
   root.querySelectorAll("[data-employer-action]").forEach((button) => button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await updateRecord("employerStatusRequests", button.dataset.id, { status: button.dataset.employerAction, reviewedAt: g3.Fire.serverTimestamp(), reviewedByUid: g3.authUser.uid, reviewerNotes: `Decision completed in Cognitus Command: ${button.dataset.employerAction}.` }, "COMMAND_EMPLOYER_STATUS", `Employer status ${button.dataset.employerAction}.`);
+      const action = button.dataset.employerAction;
+      const requestRecord = await readDoc("employerStatusRequests", button.dataset.id);
+      if (!requestRecord) throw new Error("Employer-status request no longer exists.");
+      const batch = g3.Fire.writeBatch(g3.db);
+      const now = g3.Fire.serverTimestamp();
+      batch.update(g3.Fire.doc(g3.db, "employerStatusRequests", button.dataset.id), {
+        status: action,
+        reviewedAt: now,
+        reviewedByUid: g3.authUser.uid,
+        reviewerNotes: `Decision completed in Cognitus Command: ${action}.`,
+        updatedAt: now
+      });
+      if (action === "approved") {
+        batch.update(g3.Fire.doc(g3.db, "users", requestRecord.applicantUid), {
+          role: "verified_employer_member",
+          organizationId: requestRecord.organizationId,
+          updatedAt: now
+        });
+      }
+      await batch.commit();
+      await writeActivity("COMMAND_EMPLOYER_STATUS", "employerStatusRequests", button.dataset.id, `Employer status ${action}.`);
       toast("Employer-status decision saved.");
       await organizationsPage();
     } catch (error) { alert(error?.message || "Employer request decision failed."); button.disabled = false; }
