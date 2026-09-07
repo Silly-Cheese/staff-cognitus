@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Cognitus Staff / Command — the internal employee and operations portal for Cognitus Solutions.">
+  <title>Cognitus Staff / Command</title>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000'/%3E%3Cpath d='M41.9 21.6c-2.6-2.8-5.7-4.2-9.4-4.2-7.8 0-13.2 5.8-13.2 14.6s5.4 14.6 13.2 14.6c3.8 0 7-1.4 9.6-4.4l-4.3-4.1c-1.4 1.6-3 2.4-5 2.4-4.1 0-6.9-3.4-6.9-8.5s2.8-8.5 6.9-8.5c1.9 0 3.6.8 5 2.4z' fill='%23fff'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar" id="topbar">
+      <a class="brand" href="#/dashboard" aria-label="Cognitus Staff / Command home">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span class="brand-copy">
+          <strong>Cognitus</strong>
+          <small>Staff / Command</small>
+        </span>
+      </a>
+      <div class="topbar-center" id="topbar-center"></div>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </header>
+
+    <div class="workspace" id="workspace">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation"></aside>
+      <main class="page" id="page-root" tabindex="-1">
+        <section class="loading-screen" aria-live="polite">
+          <span class="loading-mark">C</span>
+          <div>
+            <strong>Opening Cognitus Command</strong>
+            <p>Connecting to the Cognitus security layer…</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="command-overlay" class="command-overlay" hidden>
+      <button class="command-backdrop" data-command-close aria-label="Close search"></button>
+      <section class="command-panel" role="dialog" aria-modal="true" aria-labelledby="command-title">
+        <div class="command-input-row">
+          <span class="command-icon" aria-hidden="true">⌕</span>
+          <input id="command-input" type="search" autocomplete="off" placeholder="Search staff, departments, employee IDs…" aria-label="Search Cognitus Command">
+          <kbd>Esc</kbd>
+        </div>
+        <div id="command-results" class="command-results"></div>
+      </section>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+  <noscript>
+    <div class="noscript">Cognitus Staff / Command requires JavaScript.</div>
+  </noscript>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
