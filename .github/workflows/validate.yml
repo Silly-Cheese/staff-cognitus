@@ -20,6 +20,7 @@ jobs:
         run: |
           node --check src/app.js
           node --check src/generation2.js
+          node --check src/generation3.js
           node --check src/firebase.js
           node --check src/utils.js
           node --check src/config/departments.js
@@ -34,6 +35,18 @@ jobs:
           grep -q 'match /commandFinance/{entryId}' firestore.command.g2.rules.fragment
           grep -q 'match /commandPayroll/{statementId}' firestore.command.g2.rules.fragment
           grep -q 'match /commandTickets/{ticketId}' firestore.command.g2.rules.fragment
+      - name: Verify Generation 3 integration
+        run: |
+          grep -q 'src/generation3.js' index.html
+          grep -q 'COMMAND_GENERATION_3_BEGIN' firestore.command.g3.rules.fragment
+          grep -q 'match /commandCases/{caseId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandEvidence/{evidenceId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandAccreditations/{recordId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandQaReviews/{reviewId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandPrCampaigns/{campaignId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandCsMacros/{macroId}' firestore.command.g3.rules.fragment
+          grep -q 'match /commandExecutiveApprovals/{approvalId}' firestore.command.g3.rules.fragment
+          grep -q 'Background checks remain automatic' src/generation3.js
       - name: Enforce no-composite-index policy
         run: |
           test ! -f firestore.indexes.json
@@ -49,3 +62,11 @@ jobs:
           grep -q 'match /staffAccess/{uid}' firestore.command.rules.fragment
           grep -q 'match /staffDirectory/{uid}' firestore.command.rules.fragment
           grep -q 'match /staffEmployment/{uid}' firestore.command.rules.fragment
+      - name: Verify Generation 3 privilege boundaries
+        run: |
+          grep -q "staffPermission('reports.review')" src/config/permissions.js
+          grep -q "staffPermission('cases.manage')" firestore.command.g3.rules.fragment
+          grep -q "staffPermission('evidence.manage')" firestore.command.g3.rules.fragment
+          grep -q "staffPermission('qa.manage')" firestore.command.g3.rules.fragment
+          grep -q "staffPermission('pr.approve')" firestore.command.g3.rules.fragment
+          grep -q "staffPermission('system.manage')" firestore.command.g3.rules.fragment
