@@ -91,6 +91,10 @@ function owner() {
 }
 
 function can(permission) {
+  if (permission === PERMISSIONS.ACCOUNTS_READ_ALL
+      && g3.userRecord?.status === "active"
+      && isActiveStaff(g3.staffAccess)
+      && ["owner", "co-owner", "chief-officer"].includes(g3.staffAccess?.rank)) return true;
   return owner() || hasPermission(g3.staffAccess, permission);
 }
 
