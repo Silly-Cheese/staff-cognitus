@@ -1,0 +1,46 @@
+name: Finalize Cognitus Command Generation 2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-generation-2.yml'
+      - 'scripts/finalize-generation-2.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Finalize Generation 2
+        run: python scripts/finalize-generation-2.py
+
+      - name: Verify JavaScript syntax
+        run: node --check src/generation2.js
+
+      - name: Verify security finalization
+        run: |
+          ! grep -q 'owner() || can(PERMISSIONS.TICKETS_ALL_READ)' src/generation2.js
+          ! grep -q 'value="leadership"' src/generation2.js
+          ! grep -A4 'function commandG2CanManageTicket' firestore.command.g2.rules.fragment | grep -q "tickets.all.read"
+          grep -q 'isActiveStaff(g2.staffAccess)' src/generation2.js
+
+      - name: Commit finalization
+        run: |
+          if git diff --quiet; then
+            echo 'Generation 2 is already finalized.'
+            exit 0
+          fi
+          git config user.name 'Cognitus Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/generation2.js firestore.command.g2.rules.fragment
+          git commit -m 'Finalize Cognitus Command generation 2'
+          git push
