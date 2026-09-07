@@ -1,0 +1,36 @@
+name: Validate Cognitus Staff / Command
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JavaScript syntax
+        run: |
+          node --check src/app.js
+          node --check src/firebase.js
+          node --check src/utils.js
+          node --check src/config/departments.js
+          node --check src/config/permissions.js
+      - name: Enforce no-composite-index policy
+        run: |
+          test ! -f firestore.indexes.json
+          ! grep -R "firestore:indexes" -n . --exclude-dir=.git
+      - name: Verify shared Firebase project
+        run: grep -q 'projectId: "cognitus-solutions"' src/config/firebaseConfig.js
+      - name: Verify staff security boundary is present in rule fragment
+        run: |
+          grep -q 'match /staffAccess/{uid}' firestore.command.rules.fragment
+          grep -q 'match /staffDirectory/{uid}' firestore.command.rules.fragment
+          grep -q 'match /staffEmployment/{uid}' firestore.command.rules.fragment
