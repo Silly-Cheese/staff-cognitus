@@ -1,0 +1,562 @@
+// Cognitus Staff / Command — Generation 3 rule fragment
+//
+// Merge this block INSIDE /databases/{database}/documents in the authoritative
+// Silly-Cheese/cognitus-solutions/firestore.rules file, after the Generation 2
+// Command block and before the final default-deny match.
+//
+// Generation 3 continues the no-composite-index policy. Client queries use
+// automatically indexed single fields or authorized full-collection reads.
+
+// COMMAND_GENERATION_3_BEGIN
+
+function commandG3CasesRead() {
+  return isOwner() || staffPermission('cases.read') || staffPermission('cases.manage');
+}
+
+function commandG3CasesManage() {
+  return isOwner() || staffPermission('cases.manage');
+}
+
+function commandG3EvidenceRead() {
+  return isOwner() || staffPermission('evidence.read') || staffPermission('evidence.manage');
+}
+
+function commandG3EvidenceManage() {
+  return isOwner() || staffPermission('evidence.manage');
+}
+
+function commandG3QaRead() {
+  return isOwner() || staffPermission('qa.read') || staffPermission('qa.manage') || staffPermission('qa.audit');
+}
+
+function commandG3QaManage() {
+  return isOwner() || staffPermission('qa.manage') || staffPermission('qa.audit');
+}
+
+function commandG3PrRead() {
+  return isOwner() || staffPermission('pr.manage') || staffPermission('pr.approve');
+}
+
+function commandG3ValidPriority(value) {
+  return value in ['low', 'normal', 'high', 'critical'];
+}
+
+function commandG3NullableString(value, maxLength) {
+  return value == null || shortString(value, maxLength);
+}
+
+function commandG3ValidCase(value, caseId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'title', 'type', 'status', 'priority', 'departmentId',
+      'subjectType', 'subjectId', 'assignedToUid', 'summary', 'createdByUid',
+      'createdAt', 'updatedAt'
+    ])
+    && value.id == caseId
+    && validCognitusId(value.cognitusId, 'CAS')
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && value.type in ['investigation', 'data_quality', 'abuse', 'organization', 'support_escalation', 'other']
+    && value.status in ['open', 'active', 'on_hold', 'closed', 'archived']
+    && commandG3ValidPriority(value.priority)
+    && validStaffDepartment(value.departmentId)
+    && value.subjectType in ['none', 'profile', 'organization', 'report', 'ticket']
+    && commandG3NullableString(value.subjectId, 140)
+    && (value.assignedToUid == null || value.assignedToUid is string)
+    && shortString(value.summary, 3000)
+    && value.summary.size() > 0
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandCases/{caseId} {
+  allow read: if commandG3CasesRead();
+
+  allow create: if commandG3CasesManage()
+    && commandG3ValidCase(request.resource.data, caseId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG3CasesManage()
+    && commandG3ValidCase(request.resource.data, caseId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidEvidence(value, evidenceId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'caseId', 'type', 'label', 'sourceUrl', 'notes',
+      'status', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == evidenceId
+    && validCognitusId(value.cognitusId, 'EVD')
+    && shortString(value.caseId, 140)
+    && value.caseId.size() > 0
+    && value.type in ['link', 'statement', 'record', 'other']
+    && shortString(value.label, 140)
+    && value.label.size() > 0
+    && commandG3NullableString(value.sourceUrl, 1000)
+    && shortString(value.notes, 2500)
+    && value.status in ['unverified', 'corroborated', 'disputed', 'invalid', 'superseded']
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandEvidence/{evidenceId} {
+  allow read: if commandG3EvidenceRead();
+
+  allow create: if commandG3EvidenceManage()
+    && commandG3ValidEvidence(request.resource.data, evidenceId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG3EvidenceManage()
+    && commandG3ValidEvidence(request.resource.data, evidenceId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidAccreditation(value, recordId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'organizationId', 'organizationName', 'level', 'status',
+      'conditions', 'reviewerUid', 'expiresAt', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == recordId
+    && validCognitusId(value.cognitusId, 'ACR')
+    && shortString(value.organizationId, 140)
+    && value.organizationId.size() > 0
+    && shortString(value.organizationName, 120)
+    && value.organizationName.size() > 0
+    && value.level in ['standard', 'enhanced', 'conditional']
+    && value.status in [
+      'preliminary_review', 'documentation_review', 'risk_assessment', 'final_review',
+      'accredited', 'denied', 'conditional', 'suspended', 'expired'
+    ]
+    && shortString(value.conditions, 2500)
+    && value.reviewerUid is string
+    && (value.expiresAt == null || value.expiresAt is timestamp)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandAccreditations/{recordId} {
+  allow read: if isOwner() || staffPermission('accreditation.manage');
+
+  allow create: if (isOwner() || staffPermission('accreditation.manage'))
+    && commandG3ValidAccreditation(request.resource.data, recordId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.reviewerUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('accreditation.manage'))
+    && commandG3ValidAccreditation(request.resource.data, recordId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.organizationId == resource.data.organizationId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.reviewerUid == request.auth.uid
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidEscalation(value, escalationId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'title', 'reason', 'fromDepartmentId', 'toDepartmentId',
+      'sourceType', 'sourceId', 'severity', 'status', 'assignedToUid', 'createdByUid',
+      'createdAt', 'updatedAt'
+    ])
+    && value.id == escalationId
+    && validCognitusId(value.cognitusId, 'ESC')
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && shortString(value.reason, 2500)
+    && value.reason.size() > 0
+    && validStaffDepartment(value.fromDepartmentId)
+    && validStaffDepartment(value.toDepartmentId)
+    && value.sourceType in ['case', 'ticket', 'report', 'incident', 'other']
+    && commandG3NullableString(value.sourceId, 140)
+    && commandG3ValidPriority(value.severity)
+    && value.status in ['open', 'assigned', 'in_progress', 'resolved', 'closed']
+    && (value.assignedToUid == null || value.assignedToUid is string)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandEscalations/{escalationId} {
+  allow read: if isOwner() || staffPermission('escalations.manage');
+
+  allow create: if (isOwner() || staffPermission('escalations.manage'))
+    && commandG3ValidEscalation(request.resource.data, escalationId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('escalations.manage'))
+    && commandG3ValidEscalation(request.resource.data, escalationId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidIncident(value, incidentId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'title', 'category', 'severity', 'status', 'summary',
+      'commanderUid', 'departmentId', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == incidentId
+    && validCognitusId(value.cognitusId, 'INC')
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && value.category in ['security', 'data_integrity', 'coordinated_abuse', 'organization_dispute', 'system', 'other']
+    && value.severity in ['normal', 'high', 'critical']
+    && value.status in ['active', 'contained', 'monitoring', 'resolved', 'closed']
+    && shortString(value.summary, 3000)
+    && value.summary.size() > 0
+    && value.commanderUid is string
+    && validStaffDepartment(value.departmentId)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandIncidents/{incidentId} {
+  allow read: if isOwner() || staffPermission('incidents.manage');
+
+  allow create: if (isOwner() || staffPermission('incidents.manage'))
+    && commandG3ValidIncident(request.resource.data, incidentId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('incidents.manage'))
+    && commandG3ValidIncident(request.resource.data, incidentId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidQaReview(value, reviewId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'subjectType', 'subjectId', 'departmentId', 'employeeUid',
+      'score', 'status', 'findings', 'reviewerUid', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == reviewId
+    && validCognitusId(value.cognitusId, 'QAR')
+    && value.subjectType in ['ticket', 'report_review', 'appeal_review', 'case', 'department_process', 'other']
+    && shortString(value.subjectId, 140)
+    && value.subjectId.size() > 0
+    && validStaffDepartment(value.departmentId)
+    && (value.employeeUid == null || value.employeeUid is string)
+    && value.score is int
+    && value.score >= 0
+    && value.score <= 100
+    && value.status in ['closed', 'finding_open', 'appealed', 'superseded']
+    && shortString(value.findings, 3000)
+    && value.reviewerUid is string
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandQaReviews/{reviewId} {
+  allow read: if commandG3QaRead();
+
+  allow create: if commandG3QaManage()
+    && commandG3ValidQaReview(request.resource.data, reviewId)
+    && request.resource.data.reviewerUid == request.auth.uid
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG3QaManage()
+    && commandG3ValidQaReview(request.resource.data, reviewId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidCorrectiveAction(value, actionId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'qaReviewId', 'departmentId', 'title', 'ownerUid',
+      'status', 'plan', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == actionId
+    && validCognitusId(value.cognitusId, 'CAR')
+    && shortString(value.qaReviewId, 140)
+    && value.qaReviewId.size() > 0
+    && validStaffDepartment(value.departmentId)
+    && shortString(value.title, 180)
+    && value.title.size() > 0
+    && (value.ownerUid == null || value.ownerUid is string)
+    && value.status in ['open', 'in_progress', 'completed', 'closed']
+    && shortString(value.plan, 3000)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandCorrectiveActions/{actionId} {
+  allow read: if commandG3QaRead()
+    || (activeStaff()
+      && currentStaff().departmentId == resource.data.departmentId
+      && staffPermission('department.manage'));
+
+  allow create: if commandG3QaManage()
+    && commandG3ValidCorrectiveAction(request.resource.data, actionId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (
+      commandG3QaManage()
+      || (activeStaff()
+        && currentStaff().departmentId == resource.data.departmentId
+        && staffPermission('department.manage'))
+    )
+    && commandG3ValidCorrectiveAction(request.resource.data, actionId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.qaReviewId == resource.data.qaReviewId
+    && request.resource.data.departmentId == resource.data.departmentId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidPrCampaign(value, campaignId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'title', 'objective', 'audience', 'ownerUid', 'status',
+      'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == campaignId
+    && validCognitusId(value.cognitusId, 'CAM')
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && shortString(value.objective, 2500)
+    && value.objective.size() > 0
+    && shortString(value.audience, 140)
+    && value.audience.size() > 0
+    && value.ownerUid is string
+    && value.status in ['planned', 'active', 'paused', 'completed', 'cancelled']
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandPrCampaigns/{campaignId} {
+  allow read: if commandG3PrRead();
+
+  allow create: if (isOwner() || staffPermission('pr.manage'))
+    && commandG3ValidPrCampaign(request.resource.data, campaignId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('pr.manage'))
+    && commandG3ValidPrCampaign(request.resource.data, campaignId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidPrItem(value, itemId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'type', 'title', 'status', 'body', 'url', 'ownerUid',
+      'approvedByUid', 'approvedAt', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == itemId
+    && validCognitusId(value.cognitusId, 'PRI')
+    && value.type in ['publication', 'partnership', 'media_inquiry', 'brand_resource', 'crisis_communication']
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && value.status in ['draft', 'pending_approval', 'approved', 'published', 'closed', 'rejected']
+    && shortString(value.body, 4000)
+    && commandG3NullableString(value.url, 1000)
+    && value.ownerUid is string
+    && (value.approvedByUid == null || value.approvedByUid is string)
+    && (value.approvedAt == null || value.approvedAt is timestamp)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandPrItems/{itemId} {
+  allow read: if commandG3PrRead();
+
+  allow create: if (isOwner() || staffPermission('pr.manage'))
+    && commandG3ValidPrItem(request.resource.data, itemId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.approvedByUid == null
+    && request.resource.data.approvedAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('pr.manage'))
+    && commandG3ValidPrItem(request.resource.data, itemId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'type', 'title', 'status', 'body', 'url', 'ownerUid', 'updatedAt'
+    ]);
+
+  allow update: if (isOwner() || staffPermission('pr.approve'))
+    && commandG3ValidPrItem(request.resource.data, itemId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'approvedByUid', 'approvedAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['approved', 'rejected']
+    && request.resource.data.approvedByUid == request.auth.uid
+    && request.resource.data.approvedAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidCsMacro(value, macroId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'title', 'category', 'body', 'status', 'createdByUid',
+      'createdAt', 'updatedAt'
+    ])
+    && value.id == macroId
+    && validCognitusId(value.cognitusId, 'CSR')
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && value.category in ['account', 'background_check_help', 'reports', 'appeals', 'organizations', 'promotional_access', 'technical', 'general']
+    && shortString(value.body, 4000)
+    && value.body.size() > 0
+    && value.status in ['active', 'archived']
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandCsMacros/{macroId} {
+  allow read: if isOwner() || staffPermission('cs.manage') || staffPermission('tickets.manage');
+
+  allow create: if (isOwner() || staffPermission('cs.manage'))
+    && commandG3ValidCsMacro(request.resource.data, macroId)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('cs.manage'))
+    && commandG3ValidCsMacro(request.resource.data, macroId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+function commandG3ValidExecutiveApproval(value, approvalId) {
+  return value is map
+    && value.keys().hasOnly([
+      'id', 'cognitusId', 'type', 'departmentId', 'title', 'reason', 'status',
+      'requestedByUid', 'decidedByUid', 'decidedAt', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.id == approvalId
+    && validCognitusId(value.cognitusId, 'APR')
+    && value.type in ['policy_exception', 'access_change', 'staffing', 'financial', 'operational', 'other']
+    && validStaffDepartment(value.departmentId)
+    && shortString(value.title, 140)
+    && value.title.size() > 0
+    && shortString(value.reason, 2500)
+    && value.reason.size() > 0
+    && value.status in ['pending', 'approved', 'denied', 'cancelled']
+    && value.requestedByUid is string
+    && (value.decidedByUid == null || value.decidedByUid is string)
+    && (value.decidedAt == null || value.decidedAt is timestamp)
+    && value.createdByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+match /commandExecutiveApprovals/{approvalId} {
+  allow read: if isOwner()
+    || staffPermission('system.manage')
+    || (activeStaff() && resource.data.requestedByUid == request.auth.uid);
+
+  allow create: if (isOwner() || staffPermission('system.manage'))
+    && commandG3ValidExecutiveApproval(request.resource.data, approvalId)
+    && request.resource.data.requestedByUid == request.auth.uid
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.status == 'pending'
+    && request.resource.data.decidedByUid == null
+    && request.resource.data.decidedAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if (isOwner() || staffPermission('system.manage'))
+    && commandG3ValidExecutiveApproval(request.resource.data, approvalId)
+    && request.resource.data.id == resource.data.id
+    && request.resource.data.cognitusId == resource.data.cognitusId
+    && request.resource.data.requestedByUid == resource.data.requestedByUid
+    && request.resource.data.createdByUid == resource.data.createdByUid
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'decidedByUid', 'decidedAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['approved', 'denied']
+    && request.resource.data.decidedByUid == request.auth.uid
+    && request.resource.data.decidedAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// COMMAND_GENERATION_3_END
