@@ -1,0 +1,16 @@
+/* Cognitus Command login chrome hotfix.
+   The fixed application sidebar must not remain visible while #page-root
+   is rendering the full-screen sign-in experience. */
+
+.workspace:has(.page.login-page) .sidebar {
+  display: none !important;
+}
+
+.workspace:has(.page.login-page) {
+  padding-top: 0 !important;
+}
+
+.page.login-page {
+  margin-left: 0 !important;
+  padding: 0 !important;
+}
