@@ -5,9 +5,10 @@
 // live in Silly-Cheese/cognitus-solutions/firestore.rules because the public
 // portal and Staff / Command share the same Firestore database.
 //
-// Merge the helper functions inside /databases/{database}/documents near the
-// existing auth helpers, and merge the match blocks BEFORE the final
-// match /{document=**} default-deny boundary.
+// Merge the helper functions inside /databases/{database}/documents and merge
+// the match blocks before the database scope closes. Firestore match rules are
+// additive, so these specific staff matches may coexist with the existing final
+// default-deny match.
 
 // ---------------------------------------------------------------------------
 // STAFF HELPERS
@@ -203,6 +204,15 @@ function canReadPrivateStaff() {
     || staffPermission('hr.records.read');
 }
 
+function safeDelegatedProvision(value) {
+  return staffPermission('staff.provision')
+    && value.rank != 'owner'
+    && value.accessLevel < currentStaff().accessLevel
+    && value.departmentId == currentStaff().departmentId
+    && value.permissions.hasOnly(currentStaff().permissions)
+    && !value.permissions.hasAny(['permissions.manage', 'system.manage']);
+}
+
 // ---------------------------------------------------------------------------
 // STAFF DIRECTORY — safe internal employee-directory data
 // ---------------------------------------------------------------------------
@@ -251,8 +261,6 @@ match /staffAccess/{uid} {
       || staffPermission('hr.records.read')
     );
 
-  // Existing active Cognitus Owners may initialize/provision staff access.
-  // A non-owner staff provisioner can never create an Owner staff rank.
   allow create: if canProvisionStaff()
     && exists(userPath(uid))
     && get(userPath(uid)).data.status == 'active'
@@ -266,15 +274,20 @@ match /staffAccess/{uid} {
     && getAfter(staffDirectoryPath(uid)).data.rank == request.resource.data.rank
     && getAfter(staffDirectoryPath(uid)).data.status == request.resource.data.status
     && (
-      request.resource.data.rank != 'owner'
-      || (
+      (
         isOwner()
-        && get(userPath(uid)).data.role == 'owner'
-        && request.resource.data.departmentId == 'executive-office'
-        && request.resource.data.accessLevel == 100
-        && 'permissions.manage' in request.resource.data.permissions
-        && 'system.manage' in request.resource.data.permissions
+        && (
+          request.resource.data.rank != 'owner'
+          || (
+            get(userPath(uid)).data.role == 'owner'
+            && request.resource.data.departmentId == 'executive-office'
+            && request.resource.data.accessLevel == 100
+            && 'permissions.manage' in request.resource.data.permissions
+            && 'system.manage' in request.resource.data.permissions
+          )
+        )
       )
+      || safeDelegatedProvision(request.resource.data)
     );
 
   // Generation 1 keeps direct security-grant edits Owner-controlled.
@@ -318,7 +331,7 @@ match /staffEmployment/{uid} {
     && request.resource.data.employeeId == getAfter(staffAccessPath(uid)).data.employeeId
     && request.resource.data.employmentStatus == getAfter(staffAccessPath(uid)).data.status;
 
-  allow update: if isOwner() || staffPermission('hr.records.manage')
+  allow update: if (isOwner() || staffPermission('hr.records.manage'))
     && validEmploymentDocument(uid, request.resource.data)
     && request.resource.data.uid == resource.data.uid
     && request.resource.data.employeeId == resource.data.employeeId
@@ -362,17 +375,12 @@ match /staffInbox/{notificationId} {
 }
 
 // ---------------------------------------------------------------------------
-// REQUIRED EXISTING-RULE CHANGE
+// REQUIRED EXISTING-RULE CHANGE FOR DELEGATED PROVISIONING
 // ---------------------------------------------------------------------------
-// In the existing match /users/{uid} block, extend the current read rule so
-// an authorized staff provisioner can resolve an EXISTING Cognitus user by
-// exact Discord ID before staff access is created:
+// In match /users/{uid}, extend the existing read rule with:
 //
-//   allow read: if signedIn()
-//     && (
-//       request.auth.uid == uid
-//       || isReviewer()
-//       || staffPermission('staff.provision')
-//     );
+//   || staffPermission('staff.provision')
 //
-// Do not grant staff provisioners write authority over users/{uid}.
+// This lets an authorized department provisioner resolve an EXISTING Cognitus
+// user by exact Discord ID. It does not grant any additional write authority
+// over users/{uid}. Main Cognitus Owners already satisfy isReviewer().
