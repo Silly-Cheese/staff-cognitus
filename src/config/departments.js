@@ -61,6 +61,7 @@ export const DEPARTMENT_MAP = Object.freeze(
 
 export const RANKS = Object.freeze([
   { id: "owner", label: "Owner", level: 100 },
+  { id: "co-owner", label: "Co-Owner", level: 100 },
   { id: "chief-officer", label: "Chief Officer", level: 90 },
   { id: "director", label: "Director", level: 75 },
   { id: "manager", label: "Manager", level: 60 },

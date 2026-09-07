@@ -2,6 +2,7 @@ export const PERMISSIONS = Object.freeze({
   PORTAL_ACCESS: "portal.access",
   DIRECTORY_READ: "directory.read",
   PROFILE_READ: "profile.read",
+  ACCOUNTS_READ_ALL: "accounts.read.all",
   DEPARTMENT_READ: "department.read",
   DEPARTMENT_MANAGE: "department.manage",
   STAFF_PROVISION: "staff.provision",
@@ -59,6 +60,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
   ],
   "chief-public-relations": [
     ...CORE,
+    PERMISSIONS.ACCOUNTS_READ_ALL,
     PERMISSIONS.DEPARTMENT_MANAGE,
     PERMISSIONS.PR_MANAGE,
     PERMISSIONS.PR_APPROVE,
@@ -66,6 +68,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
   ],
   "chief-customer-service": [
     ...CORE,
+    PERMISSIONS.ACCOUNTS_READ_ALL,
     PERMISSIONS.DEPARTMENT_MANAGE,
     PERMISSIONS.TICKETS_READ,
     PERMISSIONS.TICKETS_MANAGE,
@@ -73,6 +76,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
   ],
   "chief-financial-officer": [
     ...CORE,
+    PERMISSIONS.ACCOUNTS_READ_ALL,
     PERMISSIONS.DEPARTMENT_MANAGE,
     PERMISSIONS.FINANCE_READ,
     PERMISSIONS.FINANCE_MANAGE,
@@ -83,6 +87,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
   ],
   "chief-human-resources": [
     ...CORE,
+    PERMISSIONS.ACCOUNTS_READ_ALL,
     PERMISSIONS.DEPARTMENT_MANAGE,
     PERMISSIONS.STAFF_MANAGE,
     PERMISSIONS.STAFF_PRIVATE_READ,
@@ -95,6 +100,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
   ],
   "chief-quality-assurance": [
     ...CORE,
+    PERMISSIONS.ACCOUNTS_READ_ALL,
     PERMISSIONS.DEPARTMENT_MANAGE,
     PERMISSIONS.QA_READ,
     PERMISSIONS.QA_MANAGE,
@@ -102,6 +108,7 @@ export const PERMISSION_BUNDLES = Object.freeze({
     PERMISSIONS.TICKETS_READ,
     PERMISSIONS.AUDIT_READ
   ],
+  "co-owner": PERMISSION_VALUES,
   owner: PERMISSION_VALUES
 });
 

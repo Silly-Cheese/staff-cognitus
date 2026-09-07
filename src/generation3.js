@@ -57,6 +57,7 @@ const G3_ROUTES = new Set([
   "/public-relations",
   "/customer-service",
   "/executive",
+  "/executive/accounts",
   "/executive/approvals",
   "/executive/audit"
 ]);
@@ -77,12 +78,16 @@ const COMMAND_PAGES = [
   ["Public Relations", "Campaigns, publications, partnerships, and media", "#/public-relations", "PR", [PERMISSIONS.PR_MANAGE, PERMISSIONS.PR_APPROVE]],
   ["Customer Service", "Service analytics, support operations, and response library", "#/customer-service", "CS", [PERMISSIONS.CS_MANAGE, PERMISSIONS.TICKETS_MANAGE]],
   ["Executive Command", "Board-level company overview", "#/executive", "EX", [PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ]],
+  ["All Accounts", "Every Cognitus account in one executive directory", "#/executive/accounts", "UA", PERMISSIONS.ACCOUNTS_READ_ALL],
   ["Executive Approvals", "Cross-company approval queue", "#/executive/approvals", "EA", PERMISSIONS.SYSTEM_MANAGE],
   ["Audit Center", "Search recent Cognitus activity", "#/executive/audit", "AU", PERMISSIONS.AUDIT_READ]
 ];
 
 function owner() {
-  return g3.userRecord?.status === "active" && g3.userRecord?.role === "owner";
+  return Boolean(
+    (g3.userRecord?.status === "active" && g3.userRecord?.role === "owner")
+    || (g3.userRecord?.status === "active" && isActiveStaff(g3.staffAccess) && g3.staffAccess?.rank === "co-owner")
+  );
 }
 
 function can(permission) {
@@ -282,6 +287,7 @@ function augmentChrome() {
     ]),
     navSection("Executive", [
       { path: "/executive", label: "Executive Command", icon: "EX", permission: [PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ] },
+      { path: "/executive/accounts", label: "All Accounts", icon: "UA", permission: PERMISSIONS.ACCOUNTS_READ_ALL },
       { path: "/executive/approvals", label: "Approvals", icon: "EA", permission: PERMISSIONS.SYSTEM_MANAGE },
       { path: "/executive/audit", label: "Audit Center", icon: "AU", permission: PERMISSIONS.AUDIT_READ }
     ])
@@ -719,6 +725,46 @@ async function customerServicePage() {
   root.querySelector("#new-macro")?.addEventListener("click", () => { const wrap = root.querySelector("#macro-form-wrap"); wrap.hidden = false; wrap.innerHTML = `<section class="form-card"><div id="macro-message" class="notice" hidden></div><form id="macro-form" class="form-stack"><div class="form-row"><label>Title<input name="title" maxlength="140" required></label><label>Category<select name="category"><option value="account">Account</option><option value="background_check_help">Background Check Help</option><option value="reports">Reports</option><option value="appeals">Appeals</option><option value="organizations">Organizations</option><option value="promotional_access">Promotional Access</option><option value="technical">Technical</option><option value="general">General</option></select></label></div><label>Response guidance<textarea name="body" maxlength="4000" rows="6" required></textarea></label><button class="button button-dark">Save Response</button></form></section>`; wrap.querySelector("#macro-form")?.addEventListener("submit", async (event) => { event.preventDefault(); const data = formObject(event.currentTarget); const message = wrap.querySelector("#macro-message"); try { await createRecord("commandCsMacros", { cognitusId: createCognitusId("CSR"), title: clean(data.title).slice(0,140), category: clean(data.category), body: clean(data.body).slice(0,4000), status: "active", createdByUid: g3.authUser.uid }, "COMMAND_CS_RESPONSE", "Created Customer Service saved response."); toast("Saved response created."); await customerServicePage(); } catch (error) { showNotice(message, error?.message || "Saved response could not be created.", "error"); } }); });
 }
 
+async function accountsPage() {
+  setTitle("All Accounts");
+  if (!can(PERMISSIONS.ACCOUNTS_READ_ALL)) return forbidden("All Accounts");
+  const accounts = alphabetic(await readCollection("users"), "displayName");
+  const staffIds = new Set(g3.directory.map((entry) => entry.uid || entry.id));
+  const activeCount = accounts.filter((entry) => entry.status === "active").length;
+  const organizationCount = accounts.filter((entry) => entry.organizationId).length;
+  const staffCount = accounts.filter((entry) => staffIds.has(entry.uid || entry.id)).length;
+
+  root.innerHTML = `<div class="page-inner" data-g3-page="accounts">
+    ${pageHeader("Executive · Account directory", "All Cognitus accounts.", "Executive visibility across every Cognitus account. Search by display name, Discord username/ID, Cognitus ID, UID, role, organization, or status.")}
+    <section class="g3-kpi"><article><span>Total Accounts</span><strong>${accounts.length}</strong></article><article><span>Active</span><strong>${activeCount}</strong></article><article><span>Organization Linked</span><strong>${organizationCount}</strong></article><article><span>Staff Accounts</span><strong>${staffCount}</strong></article></section>
+    <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Account directory</p><h2>Every account</h2></div></header><div class="panel-body"><div class="g3-toolbar"><div class="input-shell"><span class="input-icon">⌕</span><input id="executive-account-search" type="search" placeholder="Search all accounts…" autocomplete="off"></div><select id="executive-account-role"><option value="">All roles</option><option value="user">User</option><option value="verified_employer_member">Verified Employer Member</option><option value="org_admin">Organization Admin</option><option value="reviewer">Reviewer</option><option value="admin">Admin</option><option value="owner">Owner</option></select></div><div id="executive-account-results"></div></div></section>
+  </div>`;
+
+  const search = root.querySelector("#executive-account-search");
+  const roleFilter = root.querySelector("#executive-account-role");
+  const results = root.querySelector("#executive-account-results");
+  const render = () => {
+    const query = lower(search?.value || "");
+    const selectedRole = roleFilter?.value || "";
+    const filtered = accounts.filter((account) => {
+      if (selectedRole && account.role !== selectedRole) return false;
+      if (!query) return true;
+      return [
+        account.displayName, account.discordUsername, account.discordId, account.cognitusId,
+        account.uid || account.id, account.role, account.organizationId, account.status
+      ].some((value) => lower(String(value || "")).includes(query));
+    });
+    results.innerHTML = filtered.length ? `<div class="g3-queue">${filtered.map((account) => {
+      const uid = account.uid || account.id;
+      const isStaffAccount = staffIds.has(uid);
+      return `<article class="g3-queue-item"><div class="g3-queue-copy"><strong>${safe(account.displayName || account.discordUsername || "Cognitus Account")}</strong><p>${safe(account.discordUsername || "No Discord username")} · ${safe(account.discordId || "No Discord ID")}</p><small>${safe(account.cognitusId || uid)}${account.organizationId ? ` · Org ${safe(account.organizationId)}` : ""}</small></div><div>${badge(account.role)} ${badge(account.status)}</div><div>${isStaffAccount ? `<a class="button button-small" href="#/staff/${safe(uid)}">Staff Profile</a>` : ""}</div></article>`;
+    }).join("")}</div>` : emptyState("UA", "No accounts matched", "Change the search or role filter to see other Cognitus accounts.");
+  };
+  search?.addEventListener("input", debounce(render, 80));
+  roleFilter?.addEventListener("change", render);
+  render();
+}
+
 async function executivePage() {
   setTitle("Executive Command");
   if (!(owner() || can(PERMISSIONS.SYSTEM_MANAGE) || can(PERMISSIONS.AUDIT_READ))) return forbidden("Executive Command");
@@ -779,6 +825,7 @@ async function renderRoute() {
     else if (current === "/public-relations") await publicRelationsPage();
     else if (current === "/customer-service") await customerServicePage();
     else if (current === "/executive") await executivePage();
+    else if (current === "/executive/accounts") await accountsPage();
     else if (current === "/executive/approvals") await approvalsPage();
     else if (current === "/executive/audit") await auditPage();
   } catch (error) {

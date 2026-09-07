@@ -74,6 +74,16 @@ const NAV = Object.freeze([
   ]}
 ]);
 
+const EXTENSION_ROUTES = new Set([
+  "/tasks", "/requests", "/projects", "/meetings", "/announcements", "/documents",
+  "/tickets", "/leave", "/hr/lifecycle", "/finance", "/payroll",
+  "/command", "/command/reports", "/command/claims", "/command/appeals",
+  "/command/organizations", "/command/cases", "/command/evidence",
+  "/command/accreditation", "/command/escalations", "/command/incidents",
+  "/department-command", "/quality", "/public-relations", "/customer-service",
+  "/executive", "/executive/accounts", "/executive/approvals", "/executive/audit"
+]);
+
 function setTitle(title) {
   document.title = `${title} · Cognitus Staff / Command`;
 }
@@ -82,8 +92,16 @@ function isMainOwner() {
   return state.userRecord?.status === "active" && state.userRecord?.role === "owner";
 }
 
+function isCoOwner() {
+  return Boolean(isActiveStaff(state.staffAccess) && state.staffAccess?.rank === "co-owner");
+}
+
+function isExecutiveOwner() {
+  return isMainOwner() || isCoOwner();
+}
+
 function can(permission) {
-  return hasPermission(state.staffAccess, permission) || (isMainOwner() && state.staffAccess?.status === "active");
+  return hasPermission(state.staffAccess, permission) || (isExecutiveOwner() && state.staffAccess?.status === "active");
 }
 
 function canAny(permissions) {
@@ -94,7 +112,7 @@ function canManageStaff() {
   // Generation 1's Staff Administration surface provisions accounts. Broader
   // HR employee-management controls arrive in Generation 2, so only explicit
   // provisioners (and the Cognitus Owner) should see this page today.
-  return isMainOwner() || can(PERMISSIONS.STAFF_PROVISION);
+  return isExecutiveOwner() || can(PERMISSIONS.STAFF_PROVISION);
 }
 
 function currentDepartment() {
@@ -140,12 +158,12 @@ function activeRoute(href) {
 
 function navItemAllowed(item) {
   if (item.permission && !can(item.permission)) return false;
-  if (item.anyPermission && !canAny(item.anyPermission) && !isMainOwner()) return false;
+  if (item.anyPermission && !canAny(item.anyPermission) && !isExecutiveOwner()) return false;
   return true;
 }
 
 function renderChrome() {
-  if (!isActiveStaff(state.staffAccess) && !isMainOwner()) return;
+  if (!isActiveStaff(state.staffAccess) && !isExecutiveOwner()) return;
   showPortalChrome();
   const department = currentDepartment();
   const directory = state.directorySelf;
@@ -623,9 +641,9 @@ async function staffAdminPage() {
       <section class="form-card"><p class="eyebrow">Provision employee</p><h2 style="margin:0 0 8px;font-size:20px;letter-spacing:-.035em">Add an existing Cognitus user</h2><p style="margin:0 0 20px;color:#666;font-size:10px;line-height:1.6">Enter the exact Discord ID already attached to the person's Cognitus account.</p><div id="staff-admin-message" class="notice" hidden></div>
         <form id="provision-form" class="form-stack">
           <label>Discord ID<input name="discordId" inputmode="numeric" required></label>
-          <div class="form-row"><label>Department<select name="departmentId" required>${DEPARTMENTS.filter((department) => department.id !== "executive-office" || isMainOwner()).map((department) => `<option value="${safe(department.id)}">${safe(department.name)}</option>`).join("")}</select></label><label>Rank<select name="rank" required>${RANKS.filter((rank) => rank.id !== "owner").map((rank) => `<option value="${safe(rank.id)}">${safe(rank.label)}</option>`).join("")}</select></label></div>
+          <div class="form-row"><label>Department<select name="departmentId" required>${DEPARTMENTS.filter((department) => department.id !== "executive-office" || isExecutiveOwner()).map((department) => `<option value="${safe(department.id)}">${safe(department.name)}</option>`).join("")}</select></label><label>Rank<select name="rank" required>${RANKS.filter((rank) => rank.id !== "owner" && (rank.id !== "co-owner" || isExecutiveOwner())).map((rank) => `<option value="${safe(rank.id)}">${safe(rank.label)}</option>`).join("")}</select></label></div>
           <label>Position Title<input name="title" maxlength="100" placeholder="e.g. Customer Service Specialist" required></label>
-          <label>Permission Preset<select name="preset" required><option value="staff">Standard Staff</option><option value="supervisor">Supervisor Foundation</option><option value="chief-public-relations">Chief Public Relations Officer</option><option value="chief-customer-service">Chief Customer Service Officer</option><option value="chief-financial-officer">Chief Financial Officer</option><option value="chief-human-resources">Chief Human Resources Officer</option><option value="chief-quality-assurance">Chief Quality Assurance Officer</option></select></label>
+          <label>Permission Preset<select name="preset" required><option value="staff">Standard Staff</option><option value="supervisor">Supervisor Foundation</option><option value="chief-public-relations">Chief Public Relations Officer</option><option value="chief-customer-service">Chief Customer Service Officer</option><option value="chief-financial-officer">Chief Financial Officer</option><option value="chief-human-resources">Chief Human Resources Officer</option><option value="chief-quality-assurance">Chief Quality Assurance Officer</option>${isExecutiveOwner() ? `<option value="co-owner">Co-Owner — Full Executive Access</option>` : ""}</select></label>
           <label>Status<select name="status"><option value="active">Active</option><option value="training">Training</option><option value="on_leave">On Leave</option></select></label>
           <button class="button button-dark" type="submit">Provision Staff Access</button>
         </form>
@@ -635,7 +653,15 @@ async function staffAdminPage() {
     <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Current staff</p><h2>${state.directory.length} employee record${state.directory.length === 1 ? "" : "s"}</h2></div></header>${state.directory.length ? `<div class="list">${state.directory.map(employeeListRow).join("")}</div>` : emptyState("SD", "No staff provisioned", "Initialize or provision the first employee to begin building the directory.")}</section>
   </div>`;
 
-  root.querySelector("#provision-form")?.addEventListener("submit", provisionStaff);
+  const provisionForm = root.querySelector("#provision-form");
+  provisionForm?.addEventListener("submit", provisionStaff);
+  provisionForm?.querySelector('[name="rank"]')?.addEventListener("change", (event) => {
+    if (event.currentTarget.value !== "co-owner") return;
+    const departmentSelect = provisionForm.querySelector('[name="departmentId"]');
+    const presetSelect = provisionForm.querySelector('[name="preset"]');
+    if (departmentSelect) departmentSelect.value = "executive-office";
+    if (presetSelect?.querySelector('option[value="co-owner"]')) presetSelect.value = "co-owner";
+  });
 }
 
 async function provisionStaff(event) {
@@ -648,6 +674,8 @@ async function provisionStaff(event) {
   if (!discordId) return showNotice(message, "Enter a valid Discord ID.", "error");
   if (!DEPARTMENTS.some((department) => department.id === data.departmentId)) return showNotice(message, "Choose a recognized Cognitus department.", "error");
   if (!RANKS.some((rank) => rank.id === data.rank) || data.rank === "owner") return showNotice(message, "Choose a valid non-owner rank.", "error");
+  if (data.rank === "co-owner" && !isExecutiveOwner()) return showNotice(message, "Only an Owner or Co-Owner can appoint another Co-Owner.", "error");
+  if (data.rank === "co-owner" && data.departmentId !== "executive-office") return showNotice(message, "Co-Owners must be assigned to the Executive Office.", "error");
   try {
     setBusy(button, true, "Provisioning…", "Provision Staff Access");
     const matches = await readQuery("users", [Fire.where("discordId", "==", discordId)]);
@@ -660,7 +688,7 @@ async function provisionStaff(event) {
 
     const employeeId = createEmployeeId();
     const now = Fire.serverTimestamp();
-    const permissions = bundle(data.preset);
+    const permissions = bundle(data.rank === "co-owner" ? "co-owner" : data.preset);
     const rank = getRank(data.rank);
     const displayName = user.displayName || user.discordUsername || "Cognitus Employee";
     const batchWriter = writeBatch();
@@ -796,6 +824,7 @@ async function renderRoute() {
   if (current === "/profile") return myProfilePage();
   if (segments[0] === "staff" && segments[1]) return staffProfilePage(decodeURIComponent(segments[1]));
   if (current === "/admin/staff") return staffAdminPage();
+  if (EXTENSION_ROUTES.has(current)) return;
   return notFoundPage("Page not found", "The requested Cognitus Command route does not exist.");
 }
 

@@ -72,7 +72,10 @@ const COMMAND_PAGES = [
 ];
 
 function owner() {
-  return g2.userRecord?.status === "active" && g2.userRecord?.role === "owner";
+  return Boolean(
+    (g2.userRecord?.status === "active" && g2.userRecord?.role === "owner")
+    || (g2.userRecord?.status === "active" && isActiveStaff(g2.staffAccess) && g2.staffAccess?.rank === "co-owner")
+  );
 }
 
 function can(permission) {
