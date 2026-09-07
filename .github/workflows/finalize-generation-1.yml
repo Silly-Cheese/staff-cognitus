@@ -1,0 +1,38 @@
+name: Finalize Cognitus Staff Generation 1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/finalize-generation-1.py"
+      - ".github/workflows/finalize-generation-1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply finalization
+        run: python scripts/finalize-generation-1.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          node --check src/app.js
+      - name: Commit finalization
+        run: |
+          if git diff --quiet; then
+            echo "Generation 1 already finalized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app.js
+          git commit -m "Finalize Cognitus Staff generation 1"
+          git push
