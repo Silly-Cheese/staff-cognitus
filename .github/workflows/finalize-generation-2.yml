@@ -28,10 +28,9 @@ jobs:
 
       - name: Verify security finalization
         run: |
-          ! grep -q 'owner() || can(PERMISSIONS.TICKETS_ALL_READ)' src/generation2.js
           ! grep -q 'value="leadership"' src/generation2.js
-          ! grep -A4 'function commandG2CanManageTicket' firestore.command.g2.rules.fragment | grep -q "tickets.all.read"
           grep -q 'isActiveStaff(g2.staffAccess)' src/generation2.js
+          python scripts/finalize-generation-2.py
 
       - name: Commit finalization
         run: |
