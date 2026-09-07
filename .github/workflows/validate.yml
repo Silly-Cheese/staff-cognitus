@@ -37,7 +37,7 @@ jobs:
       - name: Enforce no-composite-index policy
         run: |
           test ! -f firestore.indexes.json
-          if grep -R "firestore:indexes" -n . --exclude-dir=.git --exclude='.github/workflows/validate.yml'; then
+          if grep -R "firestore:indexes" -n . --exclude-dir=.git --exclude='validate.yml'; then
             echo "Composite index deployment reference found."
             exit 1
           fi
