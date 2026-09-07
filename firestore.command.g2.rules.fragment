@@ -1,0 +1,599 @@
+// Cognitus Staff / Command — Generation 2 rule fragment
+//
+// Merge this block INSIDE /databases/{database}/documents in the authoritative
+// Silly-Cheese/cognitus-solutions/firestore.rules file, after the Generation 1
+// staff helpers and before the final default-deny match.
+//
+// Generation 2 intentionally uses only simple, single-field query shapes so no
+// composite Firestore indexes are required.
+
+// COMMAND_GENERATION_2_BEGIN
+
+function commandG2CanManageDepartment(departmentId) {
+  return isOwner()
+    || (activeStaff()
+      && currentStaff().departmentId == departmentId
+      && staffPermission('department.manage'))
+    || (departmentId == 'human-resources' && staffPermission('hr.records.manage'))
+    || (departmentId == 'finance' && staffPermission('finance.manage'))
+    || (departmentId == 'customer-service' && staffPermission('tickets.manage'));
+}
+
+function commandG2CanPublishCompany() {
+  return isOwner() || staffPermission('system.manage');
+}
+
+function commandG2CanManageHr() {
+  return isOwner() || staffPermission('hr.records.manage');
+}
+
+function commandG2CanReadHr() {
+  return isOwner() || staffPermission('hr.records.read') || staffPermission('hr.records.manage');
+}
+
+function commandG2CanReadFinance() {
+  return isOwner() || staffPermission('finance.read') || staffPermission('finance.manage');
+}
+
+function commandG2CanManageFinance() {
+  return isOwner() || staffPermission('finance.manage');
+}
+
+function commandG2CanReadPayroll() {
+  return isOwner() || staffPermission('payroll.read') || staffPermission('payroll.manage');
+}
+
+function commandG2CanManagePayroll() {
+  return isOwner() || staffPermission('payroll.manage');
+}
+
+function commandG2CanManageTicket(departmentId) {
+  return isOwner()
+    || staffPermission('tickets.all.read')
+    || (staffPermission('tickets.manage') && currentStaff().departmentId == departmentId);
+}
+
+function commandG2VisibilityRead(value) {
+  return activeStaff()
+    && (
+      value.visibility == 'company'
+      || value.departmentId == currentStaff().departmentId
+    );
+}
+
+function commandG2ValidVisibility(value) {
+  return value in ['company', 'department'];
+}
+
+function commandG2ValidPriority(value) {
+  return value in ['low', 'normal', 'high', 'critical'];
+}
+
+// ---------------------------------------------------------------------------
+// TASKS
+// ---------------------------------------------------------------------------
+match /commandTasks/{taskId} {
+  allow read: if activeStaff()
+    && (
+      isOwner()
+      || resource.data.assignedToUid == request.auth.uid
+      || resource.data.createdByUid == request.auth.uid
+      || (staffPermission('department.manage')
+        && resource.data.departmentId == currentStaff().departmentId)
+    );
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'title', 'description', 'priority', 'status', 'assignedToUid',
+      'ownerUid', 'createdByUid', 'departmentId', 'dueAt', 'completedAt',
+      'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == taskId
+    && shortString(request.resource.data.title, 120)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.description, 1800)
+    && commandG2ValidPriority(request.resource.data.priority)
+    && request.resource.data.status == 'open'
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.ownerUid == request.resource.data.assignedToUid
+    && request.resource.data.assignedToUid is string
+    && validStaffDepartment(request.resource.data.departmentId)
+    && exists(staffAccessPath(request.resource.data.assignedToUid))
+    && get(staffAccessPath(request.resource.data.assignedToUid)).data.departmentId == request.resource.data.departmentId
+    && (
+      request.resource.data.assignedToUid == request.auth.uid
+      || (
+        staffPermission('department.manage')
+        && request.resource.data.departmentId == currentStaff().departmentId
+      )
+    )
+    && (request.resource.data.dueAt == null || request.resource.data.dueAt is timestamp)
+    && request.resource.data.completedAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if activeStaff()
+    && (
+      isOwner()
+      || resource.data.assignedToUid == request.auth.uid
+      || resource.data.createdByUid == request.auth.uid
+      || (staffPermission('department.manage')
+        && resource.data.departmentId == currentStaff().departmentId)
+    )
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'completedAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['open', 'in_progress', 'blocked', 'done', 'cancelled']
+    && (
+      (request.resource.data.status == 'done' && request.resource.data.completedAt == request.time)
+      || (request.resource.data.status != 'done' && request.resource.data.completedAt == null)
+    )
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// REQUESTS
+// ---------------------------------------------------------------------------
+match /commandRequests/{requestId} {
+  allow read: if activeStaff()
+    && (
+      isOwner()
+      || resource.data.requestorUid == request.auth.uid
+      || commandG2CanManageDepartment(resource.data.departmentId)
+    );
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'requestorUid', 'departmentId', 'type', 'title', 'details',
+      'status', 'reviewedByUid', 'reviewedAt', 'resolutionNote',
+      'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == requestId
+    && request.resource.data.requestorUid == request.auth.uid
+    && validStaffDepartment(request.resource.data.departmentId)
+    && request.resource.data.type in ['general', 'access', 'purchase', 'hr', 'scheduling', 'finance']
+    && shortString(request.resource.data.title, 120)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.details, 2500)
+    && request.resource.data.details.size() > 0
+    && request.resource.data.status == 'pending'
+    && request.resource.data.reviewedByUid == null
+    && request.resource.data.reviewedAt == null
+    && request.resource.data.resolutionNote == ''
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if activeStaff()
+    && commandG2CanManageDepartment(resource.data.departmentId)
+    && resource.data.requestorUid != request.auth.uid
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'reviewedByUid', 'reviewedAt', 'resolutionNote', 'updatedAt'
+    ])
+    && request.resource.data.status in ['pending', 'approved', 'declined', 'closed']
+    && request.resource.data.reviewedByUid == request.auth.uid
+    && request.resource.data.reviewedAt == request.time
+    && shortString(request.resource.data.resolutionNote, 1500)
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// ANNOUNCEMENTS
+// ---------------------------------------------------------------------------
+match /commandAnnouncements/{announcementId} {
+  allow read: if activeStaff()
+    && (
+      resource.data.audience == 'company'
+      || resource.data.departmentId == currentStaff().departmentId
+    );
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'title', 'body', 'audience', 'departmentId', 'priority', 'pinned',
+      'publishedAt', 'expiresAt', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == announcementId
+    && shortString(request.resource.data.title, 140)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.body, 5000)
+    && request.resource.data.body.size() > 0
+    && request.resource.data.audience in ['company', 'department']
+    && commandG2ValidPriority(request.resource.data.priority)
+    && request.resource.data.pinned is bool
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.publishedAt == request.time
+    && (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp)
+    && (
+      (
+        request.resource.data.audience == 'company'
+        && request.resource.data.departmentId == null
+        && commandG2CanPublishCompany()
+      )
+      || (
+        request.resource.data.audience == 'department'
+        && request.resource.data.departmentId == currentStaff().departmentId
+        && (staffPermission('department.manage') || commandG2CanPublishCompany())
+      )
+    )
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update, delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENT LIBRARY
+// ---------------------------------------------------------------------------
+match /commandDocuments/{documentId} {
+  allow read: if commandG2VisibilityRead(resource.data);
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'title', 'description', 'url', 'category', 'visibility',
+      'departmentId', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == documentId
+    && shortString(request.resource.data.title, 140)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.description, 1200)
+    && shortString(request.resource.data.url, 1000)
+    && request.resource.data.url.matches('^https://.+')
+    && request.resource.data.category in ['policy', 'procedure', 'form', 'guide', 'training', 'reference']
+    && commandG2ValidVisibility(request.resource.data.visibility)
+    && request.resource.data.createdByUid == request.auth.uid
+    && (
+      (
+        request.resource.data.visibility == 'company'
+        && request.resource.data.departmentId == null
+        && commandG2CanPublishCompany()
+      )
+      || (
+        request.resource.data.visibility == 'department'
+        && request.resource.data.departmentId == currentStaff().departmentId
+        && (staffPermission('department.manage') || commandG2CanPublishCompany())
+      )
+    )
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update, delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// PROJECTS
+// ---------------------------------------------------------------------------
+match /commandProjects/{projectId} {
+  allow read: if commandG2VisibilityRead(resource.data);
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'title', 'description', 'status', 'visibility', 'departmentId',
+      'leadUid', 'memberUids', 'dueAt', 'createdByUid', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == projectId
+    && shortString(request.resource.data.title, 140)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.description, 2500)
+    && request.resource.data.status == 'planning'
+    && commandG2ValidVisibility(request.resource.data.visibility)
+    && validStaffDepartment(request.resource.data.departmentId)
+    && request.resource.data.leadUid is string
+    && exists(staffAccessPath(request.resource.data.leadUid))
+    && request.resource.data.memberUids is list
+    && request.resource.data.memberUids.size() >= 1
+    && request.resource.data.memberUids.size() <= 50
+    && request.resource.data.leadUid in request.resource.data.memberUids
+    && (request.resource.data.dueAt == null || request.resource.data.dueAt is timestamp)
+    && request.resource.data.createdByUid == request.auth.uid
+    && (
+      commandG2CanPublishCompany()
+      || (
+        staffPermission('department.manage')
+        && request.resource.data.departmentId == currentStaff().departmentId
+        && request.resource.data.visibility == 'department'
+      )
+    )
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if activeStaff()
+    && (
+      isOwner()
+      || resource.data.leadUid == request.auth.uid
+      || (staffPermission('department.manage')
+        && resource.data.departmentId == currentStaff().departmentId)
+    )
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt'])
+    && request.resource.data.status in ['planning', 'active', 'on_hold', 'complete', 'cancelled']
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// MEETINGS
+// ---------------------------------------------------------------------------
+match /commandMeetings/{meetingId} {
+  allow read: if commandG2VisibilityRead(resource.data);
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'title', 'summary', 'startsAt', 'endsAt', 'location', 'url',
+      'visibility', 'departmentId', 'organizerUid', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == meetingId
+    && shortString(request.resource.data.title, 140)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.summary, 2000)
+    && request.resource.data.startsAt is timestamp
+    && request.resource.data.endsAt is timestamp
+    && request.resource.data.endsAt > request.resource.data.startsAt
+    && shortString(request.resource.data.location, 160)
+    && (request.resource.data.url == null
+      || (shortString(request.resource.data.url, 1000)
+        && request.resource.data.url.matches('^https://.+')))
+    && commandG2ValidVisibility(request.resource.data.visibility)
+    && request.resource.data.organizerUid == request.auth.uid
+    && (
+      (
+        request.resource.data.visibility == 'company'
+        && request.resource.data.departmentId == null
+        && commandG2CanPublishCompany()
+      )
+      || (
+        request.resource.data.visibility == 'department'
+        && request.resource.data.departmentId == currentStaff().departmentId
+        && (staffPermission('department.manage') || commandG2CanPublishCompany())
+      )
+    )
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update, delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// LEAVE
+// ---------------------------------------------------------------------------
+match /commandLeave/{leaveId} {
+  allow read: if activeStaff()
+    && (
+      resource.data.requestorUid == request.auth.uid
+      || commandG2CanReadHr()
+    );
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'requestorUid', 'employeeId', 'type', 'startsAt', 'endsAt',
+      'reason', 'status', 'reviewerUid', 'reviewedAt', 'reviewNote',
+      'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == leaveId
+    && request.resource.data.requestorUid == request.auth.uid
+    && request.resource.data.employeeId == currentStaff().employeeId
+    && request.resource.data.type in ['personal', 'vacation', 'medical', 'school', 'other']
+    && request.resource.data.startsAt is timestamp
+    && request.resource.data.endsAt is timestamp
+    && request.resource.data.endsAt >= request.resource.data.startsAt
+    && shortString(request.resource.data.reason, 1500)
+    && request.resource.data.status == 'pending'
+    && request.resource.data.reviewerUid == null
+    && request.resource.data.reviewedAt == null
+    && request.resource.data.reviewNote == ''
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG2CanManageHr()
+    && resource.data.requestorUid != request.auth.uid
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'reviewerUid', 'reviewedAt', 'reviewNote', 'updatedAt'
+    ])
+    && request.resource.data.status in ['approved', 'declined', 'cancelled']
+    && request.resource.data.reviewerUid == request.auth.uid
+    && request.resource.data.reviewedAt == request.time
+    && shortString(request.resource.data.reviewNote, 1500)
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// HR EMPLOYEE LIFECYCLE
+// ---------------------------------------------------------------------------
+match /commandLifecycle/{recordId} {
+  allow read: if commandG2CanReadHr();
+
+  allow create: if commandG2CanManageHr()
+    && request.resource.data.keys().hasOnly([
+      'id', 'employeeUid', 'action', 'title', 'notes', 'checklist',
+      'completedSteps', 'status', 'openedByUid', 'completedAt',
+      'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == recordId
+    && request.resource.data.employeeUid is string
+    && exists(staffAccessPath(request.resource.data.employeeUid))
+    && request.resource.data.action in ['onboarding', 'transfer', 'promotion', 'status_change', 'offboarding']
+    && shortString(request.resource.data.title, 140)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.notes, 3000)
+    && request.resource.data.checklist is list
+    && request.resource.data.checklist.size() <= 30
+    && request.resource.data.completedSteps is list
+    && request.resource.data.completedSteps.size() == 0
+    && request.resource.data.status == 'open'
+    && request.resource.data.openedByUid == request.auth.uid
+    && request.resource.data.completedAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG2CanManageHr()
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'completedAt', 'completedSteps', 'updatedAt'
+    ])
+    && request.resource.data.status in ['open', 'in_progress', 'complete', 'cancelled']
+    && request.resource.data.completedSteps is list
+    && request.resource.data.completedSteps.size() <= resource.data.checklist.size()
+    && (
+      (request.resource.data.status == 'complete' && request.resource.data.completedAt == request.time)
+      || (request.resource.data.status != 'complete' && request.resource.data.completedAt == null)
+    )
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// FINANCE
+// ---------------------------------------------------------------------------
+match /commandFinance/{entryId} {
+  allow read: if commandG2CanReadFinance();
+
+  allow create: if commandG2CanManageFinance()
+    && request.resource.data.keys().hasOnly([
+      'id', 'entryType', 'amountCents', 'category', 'memo', 'departmentId',
+      'status', 'submittedByUid', 'approvedByUid', 'approvedAt', 'occurredAt',
+      'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == entryId
+    && request.resource.data.entryType in ['expense', 'income', 'reimbursement', 'purchase']
+    && request.resource.data.amountCents is int
+    && request.resource.data.amountCents > 0
+    && shortString(request.resource.data.category, 80)
+    && request.resource.data.category.size() > 0
+    && shortString(request.resource.data.memo, 180)
+    && request.resource.data.memo.size() > 0
+    && validStaffDepartment(request.resource.data.departmentId)
+    && request.resource.data.status in ['pending', 'approved']
+    && request.resource.data.submittedByUid == request.auth.uid
+    && (
+      (
+        request.resource.data.status == 'approved'
+        && request.resource.data.approvedByUid == request.auth.uid
+        && request.resource.data.approvedAt == request.time
+      )
+      || (
+        request.resource.data.status == 'pending'
+        && request.resource.data.approvedByUid == null
+        && request.resource.data.approvedAt == null
+      )
+    )
+    && request.resource.data.occurredAt is timestamp
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG2CanManageFinance()
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'approvedByUid', 'approvedAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['approved', 'declined', 'posted']
+    && request.resource.data.approvedByUid == request.auth.uid
+    && request.resource.data.approvedAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// PAYROLL
+// ---------------------------------------------------------------------------
+match /commandPayroll/{statementId} {
+  allow read: if activeStaff()
+    && (
+      resource.data.employeeUid == request.auth.uid
+      || commandG2CanReadPayroll()
+    );
+
+  allow create: if commandG2CanManagePayroll()
+    && request.resource.data.keys().hasOnly([
+      'id', 'employeeUid', 'periodLabel', 'periodStart', 'periodEnd',
+      'grossCents', 'adjustmentsCents', 'netCents', 'status', 'notes',
+      'createdByUid', 'approvedByUid', 'paidAt', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == statementId
+    && request.resource.data.employeeUid is string
+    && exists(staffAccessPath(request.resource.data.employeeUid))
+    && shortString(request.resource.data.periodLabel, 80)
+    && request.resource.data.periodLabel.size() > 0
+    && request.resource.data.periodStart is timestamp
+    && request.resource.data.periodEnd is timestamp
+    && request.resource.data.periodEnd >= request.resource.data.periodStart
+    && request.resource.data.grossCents is int
+    && request.resource.data.adjustmentsCents is int
+    && request.resource.data.netCents is int
+    && request.resource.data.grossCents >= 0
+    && request.resource.data.netCents >= 0
+    && request.resource.data.status == 'draft'
+    && shortString(request.resource.data.notes, 1500)
+    && request.resource.data.createdByUid == request.auth.uid
+    && request.resource.data.approvedByUid == null
+    && request.resource.data.paidAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG2CanManagePayroll()
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'approvedByUid', 'paidAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['approved', 'paid', 'void']
+    && request.resource.data.approvedByUid == request.auth.uid
+    && (
+      (request.resource.data.status == 'paid' && request.resource.data.paidAt == request.time)
+      || (request.resource.data.status != 'paid' && request.resource.data.paidAt == null)
+    )
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// INTERNAL SERVICE DESK
+// ---------------------------------------------------------------------------
+match /commandTickets/{ticketId} {
+  allow read: if activeStaff()
+    && (
+      resource.data.requesterUid == request.auth.uid
+      || isOwner()
+      || staffPermission('tickets.all.read')
+      || (staffPermission('tickets.manage')
+        && resource.data.departmentId == currentStaff().departmentId)
+    );
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'requesterUid', 'departmentId', 'category', 'priority', 'subject',
+      'details', 'status', 'assignedToUid', 'resolvedAt', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == ticketId
+    && request.resource.data.requesterUid == request.auth.uid
+    && validStaffDepartment(request.resource.data.departmentId)
+    && request.resource.data.category in ['general', 'access', 'technical', 'hr', 'finance', 'policy']
+    && commandG2ValidPriority(request.resource.data.priority)
+    && shortString(request.resource.data.subject, 140)
+    && request.resource.data.subject.size() > 0
+    && shortString(request.resource.data.details, 3000)
+    && request.resource.data.details.size() > 0
+    && request.resource.data.status == 'open'
+    && request.resource.data.assignedToUid == null
+    && request.resource.data.resolvedAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if commandG2CanManageTicket(resource.data.departmentId)
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      'status', 'assignedToUid', 'resolvedAt', 'updatedAt'
+    ])
+    && request.resource.data.status in ['open', 'in_progress', 'resolved', 'closed']
+    && request.resource.data.assignedToUid == request.auth.uid
+    && (
+      (request.resource.data.status == 'resolved' && request.resource.data.resolvedAt == request.time)
+      || (request.resource.data.status != 'resolved' && request.resource.data.resolvedAt == null)
+    )
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// COMMAND_GENERATION_2_END
