@@ -1,0 +1,52 @@
+name: Fix Navigation and Executive Access
+
+on:
+  push:
+    paths:
+      - 'scripts/fix-navigation-executive-access.py'
+      - '.github/workflows/fix-navigation-executive-access.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply portal repair
+        run: python scripts/fix-navigation-executive-access.py
+      - name: Syntax-check JavaScript
+        run: |
+          node --check src/app.js
+          node --check src/generation2.js
+          node --check src/generation3.js
+          node --check src/config/departments.js
+          node --check src/config/permissions.js
+      - name: Verify route coverage
+        run: |
+          grep -F 'if (EXTENSION_ROUTES.has(current)) return;' src/app.js
+          grep -F '"/executive/accounts"' src/generation3.js
+          grep -F 'async function accountsPage()' src/generation3.js
+          grep -F 'id: "co-owner"' src/config/departments.js
+          grep -F 'ACCOUNTS_READ_ALL: "accounts.read.all"' src/config/permissions.js
+      - name: Commit portal repair
+        run: |
+          if git diff --quiet -- src/app.js src/generation2.js src/generation3.js src/config/departments.js src/config/permissions.js; then
+            echo 'Portal repair already applied.'
+            exit 0
+          fi
+          git config user.name 'Cognitus Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/app.js src/generation2.js src/generation3.js src/config/departments.js src/config/permissions.js
+          git commit -m 'Fix Command navigation and add Co-Owner executive access'
+          git push
