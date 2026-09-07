@@ -26,9 +26,13 @@ jobs:
       - name: Enforce no-composite-index policy
         run: |
           test ! -f firestore.indexes.json
-          ! grep -R "firestore:indexes" -n . --exclude-dir=.git
+          if grep -R "firestore:indexes" -n . --exclude-dir=.git; then
+            echo "Composite index deployment reference found."
+            exit 1
+          fi
       - name: Verify shared Firebase project
-        run: grep -q 'projectId: "cognitus-solutions"' src/config/firebaseConfig.js
+        run: |
+          grep -q 'projectId: "cognitus-solutions"' src/config/firebaseConfig.js
       - name: Verify staff security boundary is present in rule fragment
         run: |
           grep -q 'match /staffAccess/{uid}' firestore.command.rules.fragment
