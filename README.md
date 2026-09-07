@@ -1,8 +1,8 @@
 # Cognitus Staff / Command
 
-Cognitus Staff / Command is the internal employee, company-operations, and leadership portal for Cognitus Solutions.
+Cognitus Staff / Command is the internal employee, company-operations, department-command, and executive portal for Cognitus Solutions.
 
-It is intentionally a separate website from the public/product Cognitus portal while using the same Firebase project, the same Cognitus Authentication identity, and the same authoritative Firestore database.
+It is intentionally separate from the public/product Cognitus portal while using the same Firebase project, the same Cognitus Authentication identity, and the same authoritative Firestore database.
 
 ```text
 projectId: cognitus-solutions
@@ -12,79 +12,36 @@ projectId: cognitus-solutions
 
 Generation 1 established the secure staff layer:
 
-- same Firebase project and Cognitus account credentials as the main Cognitus Solutions portal
+- same Firebase project and Cognitus credentials as the main site
 - staff-only access gate backed by `staffAccess/{uid}`
 - safe first-owner Command bootstrap
-- employee directory and employee profile surfaces
-- department workspaces for Executive Office, Public Relations, Customer Service, Finance, Human Resources, and Quality Assurance
-- Chief Officer / Board-level department structure
-- permission-driven navigation and authorization helpers
-- staff search / Command palette foundation
-- staff Inbox
+- staff directory and employee profiles
+- departments and Chief Officer / Board-level structure
+- permission-driven navigation
+- Command search
+- Staff Inbox
 - existing-Cognitus-user staff provisioning
-- audit activity writes into the existing Cognitus `auditLogs` collection
-- responsive black-and-white Cognitus interface
+- audit activity integration
+- responsive Cognitus design
 - no composite-index dependency
 
 ## Generation 2 — Company Portal
 
-Generation 2 turns Command into the day-to-day operating system for Cognitus staff.
+Generation 2 added the day-to-day company operating systems:
 
-### Work management
+- Tasks
+- Requests
+- Projects
+- Meetings
+- Announcements
+- Documents
+- Service Desk / Tickets
+- Leave
+- Employee Lifecycle / HR
+- Finance
+- Payroll
 
-- **Tasks** — personal assignments, department delegation, priority, due dates, blocked/in-progress/completed states
-- **Requests** — internal requests routed to Cognitus departments with approval, decline, and closure workflows
-- **Projects** — larger company or department initiatives with project leads, visibility, due dates, and lifecycle states
-- **Meetings** — company/department meeting schedule with agendas, times, locations, and secure HTTPS meeting links
-
-### Staff resources
-
-- **Announcements** — official company-wide or department notices with priority, pinning, and expiration
-- **Documents** — link-based policy, procedure, form, guide, training, and reference library
-- **Service Desk** — internal support tickets with department routing, priority, claiming, and resolution
-- **Leave** — employee time-away requests with HR review
-
-### Management operations
-
-- **Employee Lifecycle** — HR-controlled onboarding, transfer, promotion, status-change, and offboarding records
-- **Finance** — internal operational ledger for expenses, income, purchases, reimbursements, and disposition
-- **Payroll** — employee-scoped payroll statements with controlled payroll-management access
-
-### Command integration
-
-Generation 2 also extends the existing Command experience rather than creating a second internal app:
-
-- the Generation 1 sidebar gains Work, Resources, and Management sections
-- the Command palette includes Generation 2 destinations
-- the dashboard receives an operations snapshot for open tasks, pending requests, and current announcements
-- task/request/ticket/project/leave events can create notifications in the existing `staffInbox`
-- significant actions make best-effort audit writes to the existing `auditLogs` collection
-
-## Architecture
-
-Employees still use their normal Cognitus credentials:
-
-- Discord ID
-- Cognitus password
-
-The Discord ID is converted to the same internal Firebase Authentication address used by the main portal:
-
-```text
-<discordId>@cognitus.local
-```
-
-There is no public Staff / Command signup flow.
-
-### Staff identity records
-
-Staff data remains separated by sensitivity:
-
-- `staffDirectory/{uid}` — internal-safe directory information
-- `staffAccess/{uid}` — rank, department, status, and security permissions
-- `staffEmployment/{uid}` — restricted HR/employment record
-- `staffInbox/{notificationId}` — employee-scoped Command notifications
-
-### Generation 2 operational collections
+Generation 2 collections:
 
 - `commandTasks`
 - `commandRequests`
@@ -98,39 +55,186 @@ Staff data remains separated by sensitivity:
 - `commandFinance`
 - `commandPayroll`
 
-See `docs/GENERATION_2.md` for the detailed authorization and data model.
+See `docs/GENERATION_2.md`.
+
+## Generation 3 — Command Operations
+
+Generation 3 turns the portal into the full operational center for Cognitus.
+
+### Command
+
+- **Command Overview** — live human-review and casework workload
+- **Report Review** — submitted-report decisions
+- **Claims** — standard claims and employer-created profile claims
+- **Appeals** — appeal/correction decisions and linked report handling
+- **Organization Review** — organization verification and employer-status requests
+- **Case Files** — internal operational investigations/casework
+- **Evidence Register** — case-linked evidence metadata and HTTPS references
+- **Accreditation** — organization accreditation lifecycle
+- **Escalations** — cross-department escalation records
+- **Incidents** — exceptional security, data, abuse, organization, and system incidents
+
+**Background checks remain automatic and self-service. There is no staff background-check approval queue.**
+
+### Department Command
+
+Every department receives a live department dashboard combining roster, leadership, tasks, tickets, requests, projects, and its specialist system.
+
+Specialist workspaces include:
+
+- Public Relations Command
+- Customer Service Command
+- Quality Assurance Command
+- Finance + Payroll
+- Human Resources / Employee Lifecycle
+- Executive Command
+
+### Quality Assurance
+
+- QA reviews
+- 0–100 scoring
+- findings
+- corrective actions
+- department and employee attribution
+- QA workload metrics
+
+QA is a sampling/improvement system, not a mandatory approval gate for all Cognitus work.
+
+### Public Relations
+
+- campaigns
+- publications
+- partnerships
+- media inquiries
+- brand resources
+- crisis communications
+- PR approval queue
+
+### Customer Service
+
+- Customer Service service-health dashboard
+- support-ticket metrics
+- saved-response guidance
+- escalation-oriented support workflow
+
+Customer Service may help users with background-check problems, but it does not approve or alter background checks merely because a user asked for help.
+
+### Executive / Board of Directors
+
+- company-wide Executive Command dashboard
+- Chief Officer roster
+- department workload snapshots
+- incidents and escalations
+- executive approval center
+- searchable Audit Center
+
+Generation 3 collections:
+
+- `commandCases`
+- `commandEvidence`
+- `commandAccreditations`
+- `commandEscalations`
+- `commandIncidents`
+- `commandQaReviews`
+- `commandCorrectiveActions`
+- `commandPrCampaigns`
+- `commandPrItems`
+- `commandCsMacros`
+- `commandExecutiveApprovals`
+
+See `docs/GENERATION_3.md`.
+
+## Main Cognitus integration
+
+The main `Silly-Cheese/cognitus-solutions` site is now treated as the customer/product application.
+
+For an account with active Command access, the main navigation exposes **Staff Command**.
+
+The old main-site `#/review` and `#/admin` routes are retired as working internal interfaces and instead direct staff to Cognitus Staff / Command. The product role system remains for compatibility, while internal authority is increasingly based on explicit staff permissions such as:
+
+- `reports.review`
+- `claims.review`
+- `appeals.review`
+- `verification.review`
+- `organizations.review`
+- `cases.read`
+- `cases.manage`
+- `evidence.read`
+- `evidence.manage`
+- `accreditation.manage`
+- `escalations.manage`
+- `incidents.manage`
+- `qa.read`
+- `qa.manage`
+- `qa.audit`
+- `pr.manage`
+- `pr.approve`
+- `cs.manage`
+- `audit.read`
+- `system.manage`
+
+## Authentication and staff identity
+
+Employees use their normal Cognitus credentials:
+
+- Discord ID
+- Cognitus password
+
+The Discord ID maps to the same synthetic Firebase Authentication address used by the main site:
+
+```text
+<discordId>@cognitus.local
+```
+
+There is no public Staff / Command signup flow.
+
+Staff data is separated by sensitivity:
+
+- `staffDirectory/{uid}` — internal-safe directory information
+- `staffAccess/{uid}` — rank, department, status, and permissions
+- `staffEmployment/{uid}` — restricted HR/employment data
+- `staffInbox/{notificationId}` — employee-scoped action notifications
 
 ## Security model
 
-Frontend route hiding is never treated as authorization. Firestore Security Rules remain the real security boundary.
+Frontend route hiding is never treated as authorization. Firestore Security Rules are the real boundary.
 
-Generation 2 follows these rules:
+Key rules:
 
-- Staff / Command requires an active `staffAccess` record with `portal.access`.
-- Ordinary staff generally see records they own, created, or are assigned.
-- department-management permissions expand authority only within the employee's department where appropriate.
-- HR, Finance, Payroll, and administrative areas require their explicit existing permission families.
-- `tickets.all.read` is read authority only; it does not grant ticket-write authority.
-- company-wide publishing is restricted to Owner/system-management authority.
-- Firestore records are schema constrained and destructive deletes are denied by the Generation 2 rules.
+- authenticated product access does not imply staff access
+- Command requires active `staffAccess` with `portal.access`
+- department/rank labels are not a substitute for explicit permissions
+- sensitive HR, Finance, Payroll, QA, case, evidence, and executive areas have separate authorization
+- `tickets.all.read` remains read-only authority
+- PR management and PR approval are distinct
+- Customer Service does not inherit report/profile mutation authority
+- destructive deletes are denied for the Command operational collections
+- no composite indexes are required
 
-## Firestore rules
+## Firestore ownership
 
-The authoritative production rules remain in the **main `Silly-Cheese/cognitus-solutions` repository** because both portals share one database.
+The authoritative production rules remain in:
 
-This repository contains:
+`Silly-Cheese/cognitus-solutions/firestore.rules`
 
-- `firestore.command.rules.fragment` — Generation 1 staff boundary
-- `firestore.command.g2.rules.fragment` — Generation 2 company-operations boundary
+This repository contains reference fragments:
 
-The Generation 2 block is integrated into the main Cognitus `firestore.rules`. Committing rules to GitHub does **not** by itself publish them to Firebase; deployment remains a Firebase step.
+- `firestore.command.rules.fragment` — Generation 1
+- `firestore.command.g2.rules.fragment` — Generation 2
+- `firestore.command.g3.rules.fragment` — Generation 3
 
-## No composite indexes
+Do not deploy a competing ruleset from this repository to the shared database.
 
-Command deliberately avoids a `firestore.indexes.json` dependency. Generation 2 uses automatically indexed single-field query shapes and performs authorized combination/sorting in the browser when practical.
+Committing the rules to GitHub does not publish them to Firebase. Production activation still requires the current main-site rules to be deployed:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+## Audit limitation
+
+Cognitus records authenticated client activity in `auditLogs`. This provides operational traceability, but it is not equivalent to a trusted-server tamper-evident audit ledger. A future backend can strengthen that guarantee without changing the portal architecture.
 
 ## Hosting
 
-The portal is static and designed for GitHub Pages. It does not require Firebase Hosting or Cloud Functions for Generations 1–2.
-
-If GitHub Pages is not yet enabled for this repository, enable Pages with **GitHub Actions** as the source and run the included deployment workflow.
+The portal is static and designed for GitHub Pages. Generations 1–3 require no Firebase Hosting or Cloud Functions.
