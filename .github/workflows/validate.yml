@@ -64,7 +64,7 @@ jobs:
           grep -q 'match /staffEmployment/{uid}' firestore.command.rules.fragment
       - name: Verify Generation 3 privilege boundaries
         run: |
-          grep -q "staffPermission('reports.review')" src/config/permissions.js
+          grep -q 'REPORTS_REVIEW: "reports.review"' src/config/permissions.js
           grep -q "staffPermission('cases.manage')" firestore.command.g3.rules.fragment
           grep -q "staffPermission('evidence.manage')" firestore.command.g3.rules.fragment
           grep -q "staffPermission('qa.manage')" firestore.command.g3.rules.fragment
