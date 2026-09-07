@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 APP = Path("src/generation2.js")
 RULES = Path("firestore.command.g2.rules.fragment")
@@ -22,11 +23,14 @@ rules = rules.replace(
 )
 RULES.write_text(rules, encoding="utf-8")
 
+manage_ticket = re.search(r"function canManageTickets\(id\) \{(?P<body>.*?)\n\}", app, re.S)
+rule_manage_ticket = re.search(r"function commandG2CanManageTicket\(departmentId\) \{(?P<body>.*?)\n\}", rules, re.S)
+
 checks = {
     "Generation 2 requires initialized staff access": '(owner() || isActiveStaff(g2.staffAccess))' not in app,
-    "read-all ticket permission cannot modify tickets": 'owner() || can(PERMISSIONS.TICKETS_ALL_READ)' not in app,
+    "read-all ticket permission cannot modify tickets": bool(manage_ticket) and "TICKETS_ALL_READ" not in manage_ticket.group("body"),
     "leadership visibility is not presented without a dedicated query key": 'value="leadership"' not in app,
-    "rule read-all ticket permission cannot modify tickets": "commandG2CanManageTicket(departmentId) {\n  return isOwner()\n    || staffPermission('tickets.all.read')" not in rules,
+    "rule read-all ticket permission cannot modify tickets": bool(rule_manage_ticket) and "tickets.all.read" not in rule_manage_ticket.group("body"),
 }
 
 failed = [name for name, ok in checks.items() if not ok]
