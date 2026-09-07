@@ -1,0 +1,378 @@
+// Cognitus Staff / Command — Generation 1 rule fragment
+//
+// IMPORTANT:
+// This is NOT an independently deployable ruleset. The authoritative rules
+// live in Silly-Cheese/cognitus-solutions/firestore.rules because the public
+// portal and Staff / Command share the same Firestore database.
+//
+// Merge the helper functions inside /databases/{database}/documents near the
+// existing auth helpers, and merge the match blocks BEFORE the final
+// match /{document=**} default-deny boundary.
+
+// ---------------------------------------------------------------------------
+// STAFF HELPERS
+// ---------------------------------------------------------------------------
+function staffAccessPath(uid) {
+  return /databases/$(database)/documents/staffAccess/$(uid);
+}
+
+function staffDirectoryPath(uid) {
+  return /databases/$(database)/documents/staffDirectory/$(uid);
+}
+
+function staffEmploymentPath(uid) {
+  return /databases/$(database)/documents/staffEmployment/$(uid);
+}
+
+function hasStaffAccess() {
+  return signedIn() && exists(staffAccessPath(request.auth.uid));
+}
+
+function currentStaff() {
+  return get(staffAccessPath(request.auth.uid)).data;
+}
+
+function activeStaff() {
+  return hasStaffAccess()
+    && currentStaff().status in ['active', 'training', 'on_leave']
+    && currentStaff().permissions is list
+    && 'portal.access' in currentStaff().permissions;
+}
+
+function staffPermission(permission) {
+  return activeStaff() && permission in currentStaff().permissions;
+}
+
+function validStaffStatus(value) {
+  return value in ['active', 'training', 'on_leave', 'suspended', 'former'];
+}
+
+function validStaffRank(value) {
+  return value in [
+    'owner', 'chief-officer', 'director', 'manager', 'supervisor',
+    'senior-staff', 'staff', 'trainee', 'restricted'
+  ];
+}
+
+function validDepartmentId(value) {
+  return value in [
+    'executive-office',
+    'public-relations',
+    'customer-service',
+    'finance',
+    'human-resources',
+    'quality-assurance'
+  ];
+}
+
+function staffRankLevel(rank) {
+  return rank == 'owner' ? 100
+    : rank == 'chief-officer' ? 90
+    : rank == 'director' ? 75
+    : rank == 'manager' ? 60
+    : rank == 'supervisor' ? 50
+    : rank == 'senior-staff' ? 40
+    : rank == 'staff' ? 30
+    : rank == 'trainee' ? 20
+    : 0;
+}
+
+function validEmployeeId(value) {
+  return value is string && value.matches('^COG-[0-9]{6}$');
+}
+
+function validStaffPermissions(value) {
+  return value is list
+    && value.size() >= 1
+    && value.size() <= 40
+    && value.hasOnly([
+      'portal.access',
+      'directory.read',
+      'profile.read',
+      'department.read',
+      'department.manage',
+      'staff.provision',
+      'staff.manage',
+      'staff.private.read',
+      'permissions.manage',
+      'tickets.read',
+      'tickets.manage',
+      'tickets.all.read',
+      'cs.manage',
+      'pr.manage',
+      'pr.approve',
+      'finance.read',
+      'finance.manage',
+      'payroll.read',
+      'payroll.manage',
+      'payroll.approve',
+      'hr.records.read',
+      'hr.records.manage',
+      'internalAffairs.read',
+      'internalAffairs.manage',
+      'qa.read',
+      'qa.manage',
+      'qa.audit',
+      'reports.review',
+      'claims.review',
+      'appeals.review',
+      'verification.review',
+      'organizations.review',
+      'cases.read',
+      'cases.manage',
+      'evidence.read',
+      'evidence.manage',
+      'accreditation.manage',
+      'escalations.manage',
+      'incidents.manage',
+      'audit.read',
+      'system.manage'
+    ]);
+}
+
+function validDirectoryDocument(uid, value) {
+  return value is map
+    && value.keys().hasOnly([
+      'uid', 'employeeId', 'displayName', 'discordUsername', 'title',
+      'departmentId', 'rank', 'status', 'joinedAt', 'createdAt', 'updatedAt'
+    ])
+    && value.uid == uid
+    && validEmployeeId(value.employeeId)
+    && shortString(value.displayName, 64)
+    && value.displayName.size() > 0
+    && shortString(value.discordUsername, 64)
+    && shortString(value.title, 100)
+    && value.title.size() > 0
+    && validDepartmentId(value.departmentId)
+    && validStaffRank(value.rank)
+    && validStaffStatus(value.status)
+    && value.joinedAt is timestamp
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+function validAccessDocument(uid, value) {
+  return value is map
+    && value.keys().hasOnly([
+      'uid', 'employeeId', 'departmentId', 'rank', 'accessLevel', 'status',
+      'permissions', 'grantedByUid', 'createdAt', 'updatedAt'
+    ])
+    && value.uid == uid
+    && validEmployeeId(value.employeeId)
+    && validDepartmentId(value.departmentId)
+    && validStaffRank(value.rank)
+    && value.accessLevel == staffRankLevel(value.rank)
+    && validStaffStatus(value.status)
+    && validStaffPermissions(value.permissions)
+    && 'portal.access' in value.permissions
+    && value.grantedByUid is string
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+function validEmploymentDocument(uid, value) {
+  return value is map
+    && value.keys().hasOnly([
+      'uid', 'employeeId', 'employmentStatus', 'managerUid', 'hireDate',
+      'positionHistory', 'notes', 'createdAt', 'updatedAt'
+    ])
+    && value.uid == uid
+    && validEmployeeId(value.employeeId)
+    && validStaffStatus(value.employmentStatus)
+    && (value.managerUid == null || value.managerUid is string)
+    && value.hireDate is timestamp
+    && value.positionHistory is list
+    && value.positionHistory.size() >= 1
+    && value.positionHistory.size() <= 100
+    && shortString(value.notes, 5000)
+    && value.createdAt is timestamp
+    && value.updatedAt is timestamp;
+}
+
+function canProvisionStaff() {
+  return isOwner() || staffPermission('staff.provision');
+}
+
+function canManageStaffDirectory() {
+  return isOwner() || staffPermission('staff.manage');
+}
+
+function canReadPrivateStaff() {
+  return isOwner()
+    || staffPermission('staff.private.read')
+    || staffPermission('hr.records.read');
+}
+
+// ---------------------------------------------------------------------------
+// STAFF DIRECTORY — safe internal employee-directory data
+// ---------------------------------------------------------------------------
+match /staffDirectory/{uid} {
+  allow read: if activeStaff();
+
+  allow create: if canProvisionStaff()
+    && exists(userPath(uid))
+    && get(userPath(uid)).data.status == 'active'
+    && validDirectoryDocument(uid, request.resource.data)
+    && request.resource.data.displayName == get(userPath(uid)).data.displayName
+    && request.resource.data.discordUsername == get(userPath(uid)).data.discordUsername
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time
+    && existsAfter(staffAccessPath(uid))
+    && getAfter(staffAccessPath(uid)).data.employeeId == request.resource.data.employeeId
+    && getAfter(staffAccessPath(uid)).data.departmentId == request.resource.data.departmentId
+    && getAfter(staffAccessPath(uid)).data.rank == request.resource.data.rank
+    && getAfter(staffAccessPath(uid)).data.status == request.resource.data.status
+    && existsAfter(staffEmploymentPath(uid))
+    && getAfter(staffEmploymentPath(uid)).data.employeeId == request.resource.data.employeeId;
+
+  allow update: if canManageStaffDirectory()
+    && validDirectoryDocument(uid, request.resource.data)
+    && request.resource.data.uid == resource.data.uid
+    && request.resource.data.employeeId == resource.data.employeeId
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time
+    && getAfter(staffAccessPath(uid)).data.departmentId == request.resource.data.departmentId
+    && getAfter(staffAccessPath(uid)).data.rank == request.resource.data.rank
+    && getAfter(staffAccessPath(uid)).data.status == request.resource.data.status;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// STAFF ACCESS — security boundary for the internal portal
+// ---------------------------------------------------------------------------
+match /staffAccess/{uid} {
+  allow read: if activeStaff()
+    && (
+      uid == request.auth.uid
+      || isOwner()
+      || staffPermission('permissions.manage')
+      || staffPermission('staff.private.read')
+      || staffPermission('hr.records.read')
+    );
+
+  // Existing active Cognitus Owners may initialize/provision staff access.
+  // A non-owner staff provisioner can never create an Owner staff rank.
+  allow create: if canProvisionStaff()
+    && exists(userPath(uid))
+    && get(userPath(uid)).data.status == 'active'
+    && validAccessDocument(uid, request.resource.data)
+    && request.resource.data.grantedByUid == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time
+    && existsAfter(staffDirectoryPath(uid))
+    && getAfter(staffDirectoryPath(uid)).data.employeeId == request.resource.data.employeeId
+    && getAfter(staffDirectoryPath(uid)).data.departmentId == request.resource.data.departmentId
+    && getAfter(staffDirectoryPath(uid)).data.rank == request.resource.data.rank
+    && getAfter(staffDirectoryPath(uid)).data.status == request.resource.data.status
+    && (
+      request.resource.data.rank != 'owner'
+      || (
+        isOwner()
+        && get(userPath(uid)).data.role == 'owner'
+        && request.resource.data.departmentId == 'executive-office'
+        && request.resource.data.accessLevel == 100
+        && 'permissions.manage' in request.resource.data.permissions
+        && 'system.manage' in request.resource.data.permissions
+      )
+    );
+
+  // Generation 1 keeps direct security-grant edits Owner-controlled.
+  allow update: if isOwner()
+    && validAccessDocument(uid, request.resource.data)
+    && request.resource.data.uid == resource.data.uid
+    && request.resource.data.employeeId == resource.data.employeeId
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time
+    && (
+      uid != request.auth.uid
+      || (
+        request.resource.data.rank == 'owner'
+        && request.resource.data.status == 'active'
+        && 'portal.access' in request.resource.data.permissions
+        && 'permissions.manage' in request.resource.data.permissions
+        && 'system.manage' in request.resource.data.permissions
+      )
+    );
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// STAFF EMPLOYMENT — restricted HR/employment record
+// ---------------------------------------------------------------------------
+match /staffEmployment/{uid} {
+  allow read: if activeStaff()
+    && (
+      uid == request.auth.uid
+      || canReadPrivateStaff()
+    );
+
+  allow create: if canProvisionStaff()
+    && validEmploymentDocument(uid, request.resource.data)
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time
+    && existsAfter(staffDirectoryPath(uid))
+    && existsAfter(staffAccessPath(uid))
+    && request.resource.data.employeeId == getAfter(staffDirectoryPath(uid)).data.employeeId
+    && request.resource.data.employeeId == getAfter(staffAccessPath(uid)).data.employeeId
+    && request.resource.data.employmentStatus == getAfter(staffAccessPath(uid)).data.status;
+
+  allow update: if isOwner() || staffPermission('hr.records.manage')
+    && validEmploymentDocument(uid, request.resource.data)
+    && request.resource.data.uid == resource.data.uid
+    && request.resource.data.employeeId == resource.data.employeeId
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// STAFF INBOX — employee-scoped action notifications
+// ---------------------------------------------------------------------------
+match /staffInbox/{notificationId} {
+  allow read: if activeStaff()
+    && resource.data.recipientUid == request.auth.uid;
+
+  allow create: if activeStaff()
+    && request.resource.data.keys().hasOnly([
+      'id', 'recipientUid', 'senderUid', 'kind', 'title', 'message',
+      'href', 'readAt', 'createdAt', 'updatedAt'
+    ])
+    && request.resource.data.id == notificationId
+    && request.resource.data.senderUid == request.auth.uid
+    && exists(staffAccessPath(request.resource.data.recipientUid))
+    && shortString(request.resource.data.kind, 50)
+    && shortString(request.resource.data.title, 120)
+    && request.resource.data.title.size() > 0
+    && shortString(request.resource.data.message, 1000)
+    && (request.resource.data.href == null || shortString(request.resource.data.href, 300))
+    && request.resource.data.readAt == null
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow update: if activeStaff()
+    && resource.data.recipientUid == request.auth.uid
+    && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readAt', 'updatedAt'])
+    && request.resource.data.readAt == request.time
+    && request.resource.data.updatedAt == request.time;
+
+  allow delete: if false;
+}
+
+// ---------------------------------------------------------------------------
+// REQUIRED EXISTING-RULE CHANGE
+// ---------------------------------------------------------------------------
+// In the existing match /users/{uid} block, extend the current read rule so
+// an authorized staff provisioner can resolve an EXISTING Cognitus user by
+// exact Discord ID before staff access is created:
+//
+//   allow read: if signedIn()
+//     && (
+//       request.auth.uid == uid
+//       || isReviewer()
+//       || staffPermission('staff.provision')
+//     );
+//
+// Do not grant staff provisioners write authority over users/{uid}.
