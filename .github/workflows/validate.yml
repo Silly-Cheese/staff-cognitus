@@ -19,14 +19,25 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check src/app.js
+          node --check src/generation2.js
           node --check src/firebase.js
           node --check src/utils.js
           node --check src/config/departments.js
           node --check src/config/permissions.js
+      - name: Verify Generation 2 integration
+        run: |
+          grep -q 'src/generation2.js' index.html
+          grep -q 'COMMAND_GENERATION_2_BEGIN' firestore.command.g2.rules.fragment
+          grep -q 'match /commandTasks/{taskId}' firestore.command.g2.rules.fragment
+          grep -q 'match /commandRequests/{requestId}' firestore.command.g2.rules.fragment
+          grep -q 'match /commandLifecycle/{recordId}' firestore.command.g2.rules.fragment
+          grep -q 'match /commandFinance/{entryId}' firestore.command.g2.rules.fragment
+          grep -q 'match /commandPayroll/{statementId}' firestore.command.g2.rules.fragment
+          grep -q 'match /commandTickets/{ticketId}' firestore.command.g2.rules.fragment
       - name: Enforce no-composite-index policy
         run: |
           test ! -f firestore.indexes.json
-          if grep -R "firestore:indexes" -n . --exclude-dir=.git --exclude='*.yml' --exclude='*.yaml'; then
+          if grep -R "firestore:indexes" -n . --exclude-dir=.git --exclude='.github/workflows/validate.yml'; then
             echo "Composite index deployment reference found."
             exit 1
           fi
