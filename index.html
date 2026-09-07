@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Cognitus Staff / Command — the internal employee and operations portal for Cognitus Solutions.">
+  <meta name="description" content="Cognitus Staff / Command — the internal employee, operations, HR, finance, and company portal for Cognitus Solutions.">
   <title>Cognitus Staff / Command</title>
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="stylesheet" href="./styles.css">
@@ -42,7 +42,7 @@
       <section class="command-panel" role="dialog" aria-modal="true" aria-labelledby="command-title">
         <div class="command-input-row">
           <span class="command-icon" aria-hidden="true">⌕</span>
-          <input id="command-input" type="search" autocomplete="off" placeholder="Search staff, departments, employee IDs…" aria-label="Search Cognitus Command">
+          <input id="command-input" type="search" autocomplete="off" placeholder="Search staff, departments, tasks, requests, resources…" aria-label="Search Cognitus Command">
           <kbd>Esc</kbd>
         </div>
         <div id="command-results" class="command-results"></div>
@@ -57,5 +57,6 @@
   </noscript>
 
   <script type="module" src="./src/app.js"></script>
+  <script type="module" src="./src/generation2.js"></script>
 </body>
 </html>
