@@ -49,7 +49,6 @@ function commandG2CanManagePayroll() {
 
 function commandG2CanManageTicket(departmentId) {
   return isOwner()
-    || staffPermission('tickets.all.read')
     || (staffPermission('tickets.manage') && currentStaff().departmentId == departmentId);
 }
 
