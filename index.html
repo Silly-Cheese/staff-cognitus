@@ -7,10 +7,9 @@
   <meta name="description" content="Cognitus Staff / Command — the internal employee, operations, HR, finance, quality, department, and executive portal for Cognitus Solutions.">
   <title>Cognitus Staff / Command</title>
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./login-hotfix.css">
-  <link rel="stylesheet" href="./portal-overhaul.css">
-  <link rel="stylesheet" href="./department-command-v2.css">
+  <link rel="stylesheet" href="./styles.css?v=20260912-v4">
+  <link rel="stylesheet" href="./login-hotfix.css?v=20260912-v4">
+  <link rel="stylesheet" href="./command-v4.css?v=20260912-v4">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000'/%3E%3Cpath d='M41.9 21.6c-2.6-2.8-5.7-4.2-9.4-4.2-7.8 0-13.2 5.8-13.2 14.6s5.4 14.6 13.2 14.6c3.8 0 7-1.4 9.6-4.4l-4.3-4.1c-1.4 1.6-3 2.4-5 2.4-4.1 0-6.9-3.4-6.9-8.5s2.8-8.5 6.9-8.5c1.9 0 3.6.8 5 2.4z' fill='%23fff'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -59,10 +58,10 @@
     <div class="noscript">Cognitus Staff / Command requires JavaScript.</div>
   </noscript>
 
-  <script type="module" src="./src/app.js"></script>
-  <script type="module" src="./src/generation2.js"></script>
-  <script type="module" src="./src/generation3.js"></script>
-  <script type="module" src="./src/portal-overhaul.js"></script>
-  <script type="module" src="./src/department-command-v2.js"></script>
+  <!-- Core identity/router stays small. Extension workspaces are now lazy-loaded
+       only when their routes are opened instead of running every generation at once. -->
+  <script type="module" src="./src/app.js?v=20260912-v4-core"></script>
+  <script type="module" src="./src/extensions-loader-v4.js?v=20260912-v4"></script>
+  <script type="module" src="./src/command-v4.js?v=20260912-v4"></script>
 </body>
 </html>
