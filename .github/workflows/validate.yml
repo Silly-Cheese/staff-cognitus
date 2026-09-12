@@ -21,17 +21,20 @@ jobs:
           node --check src/app.js
           node --check src/extensions-loader-v4.js
           node --check src/command-v4.js
+          node --check src/staff-system-v5.js
           node --check src/generation2.js
           node --check src/generation3.js
           node --check src/firebase.js
           node --check src/utils.js
           node --check src/config/departments.js
           node --check src/config/permissions.js
-      - name: Verify consolidated V4 runtime
+      - name: Verify consolidated V5 runtime
         run: |
           grep -q 'src/app.js' index.html
           grep -q 'src/extensions-loader-v4.js' index.html
           grep -q 'src/command-v4.js' index.html
+          grep -q 'src/staff-system-v5.js' index.html
+          grep -q 'staff-system-v5.css' index.html
           grep -q 'generation2.js' src/extensions-loader-v4.js
           grep -q 'generation3.js' src/extensions-loader-v4.js
           if grep -q 'src/portal-overhaul.js' index.html; then
@@ -69,8 +72,8 @@ jobs:
             echo "Composite index deployment reference found."
             exit 1
           fi
-          if grep -R "orderBy(" -n src/command-v4.js src/extensions-loader-v4.js; then
-            echo "V4 must sort locally instead of requiring composite indexes."
+          if grep -R "orderBy(" -n src/command-v4.js src/extensions-loader-v4.js src/staff-system-v5.js; then
+            echo "V5 shell must sort locally instead of requiring composite indexes."
             exit 1
           fi
       - name: Verify shared Firebase project
