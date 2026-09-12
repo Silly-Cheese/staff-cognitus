@@ -1,5 +1,5 @@
 import { firebaseState, readDoc, readCollection, readQuery, writeBatch } from "./firebase.js";
-import { DEPARTMENTS, getDepartment, getRank } from "./config/departments.js";
+import { getDepartment, getRank } from "./config/departments.js";
 import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js";
 import { clean, lower, safe, route, formatTimestamp, formatDate, newestFirst, initials, relativeGreeting, titleCase } from "./utils.js";
 
@@ -44,11 +44,17 @@ function owner() {
 }
 function activeStaff() { return Boolean(v4.authUser && v4.userRecord?.status === "active" && isActiveStaff(v4.staffAccess)); }
 function can(permission) { return owner() || hasPermission(v4.staffAccess, permission); }
-function canAny(values = []) { return values.some(can); }
+function canAny(values = []) { return values.some((permission) => can(permission)); }
 function ownDepartmentId() { return v4.staffAccess?.departmentId || v4.directorySelf?.departmentId || ""; }
 function ownDepartment() { return getDepartment(ownDepartmentId()); }
 function rankLabel() { return getRank(v4.staffAccess?.rank || v4.directorySelf?.rank).label; }
-function currentHashPath() { return route(); }
+function hashParams() { return new URLSearchParams((location.hash.split("?")[1] || "").replace(/^#/, "")); }
+function dashboardView() { return clean(hashParams().get("view") || "home").toLowerCase(); }
+function workKind() { return clean(hashParams().get("kind") || "all").toLowerCase(); }
+function dashboardHref(view = "home", extra = "") {
+  if (view === "home") return "#/dashboard";
+  return `#/dashboard?view=${encodeURIComponent(view)}${extra}`;
+}
 
 function timestampMs(value) {
   try {
@@ -75,7 +81,7 @@ function mergeUnique(...groups) {
 function isOpen(value) { return !CLOSED.has(lower(value || "open")); }
 function priorityWeight(value) {
   const key = lower(value);
-  return key === "critical" ? 50 : key === "high" ? 32 : key === "urgent" ? 40 : key === "low" ? 2 : 10;
+  return key === "critical" ? 50 : key === "urgent" ? 40 : key === "high" ? 32 : key === "low" ? 2 : 10;
 }
 function sameDay(ms, date = new Date()) {
   if (!ms) return false;
@@ -85,7 +91,7 @@ function sameDay(ms, date = new Date()) {
 function todayLabel() {
   return new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date());
 }
-function cacheKey() { return `${v4.authUser?.uid || "none"}:${ownDepartmentId() || "none"}`; }
+function cacheKey(suffix = "day") { return `${suffix}:${v4.authUser?.uid || "none"}:${ownDepartmentId() || "none"}`; }
 
 async function safeQuery(collectionName, constraints = []) {
   try { return await readQuery(collectionName, constraints); }
@@ -104,8 +110,12 @@ async function safeCollection(collectionName) {
 
 async function refreshIdentity(user) {
   v4.authUser = user || null;
+  v4.cache.clear();
   if (!user) {
-    v4.userRecord = null; v4.staffAccess = null; v4.directorySelf = null; v4.directory = []; v4.cache.clear();
+    v4.userRecord = null;
+    v4.staffAccess = null;
+    v4.directorySelf = null;
+    v4.directory = [];
     return;
   }
   const [userRecord, staffAccess, directorySelf] = await Promise.all([
@@ -126,16 +136,22 @@ async function refreshIdentity(user) {
 
 async function loadMyDay(force = false) {
   if (!activeStaff()) return null;
-  const key = cacheKey();
+  const key = cacheKey("day");
   const existing = v4.cache.get(key);
   if (!force && existing && Date.now() - existing.loadedAt < 30000) return existing.data;
+
   const uid = v4.authUser.uid;
   const dept = ownDepartmentId();
   const F = v4.Fire;
 
-  // Every query intentionally uses only one equality filter. Sorting and merging
-  // happen client-side so Staff / Command does not require composite indexes.
-  const [tasksAssigned, tasksCreated, ticketsRequested, ticketsAssigned, requests, leave, payroll, inbox, meetings, announcements] = await Promise.all([
+  // Deliberately single-field queries only. V4 does not add composite indexes.
+  const [
+    tasksAssigned, tasksCreated,
+    ticketsRequested, ticketsAssigned,
+    requests, leave, payroll, inbox,
+    deptMeetings, companyMeetings,
+    deptAnnouncements, companyAnnouncements
+  ] = await Promise.all([
     safeQuery("commandTasks", [F.where("assignedToUid", "==", uid)]),
     safeQuery("commandTasks", [F.where("createdByUid", "==", uid)]),
     safeQuery("commandTickets", [F.where("requesterUid", "==", uid)]),
@@ -145,31 +161,59 @@ async function loadMyDay(force = false) {
     safeQuery("commandPayroll", [F.where("employeeUid", "==", uid)]),
     safeQuery("staffInbox", [F.where("recipientUid", "==", uid)]),
     dept ? safeQuery("commandMeetings", [F.where("departmentId", "==", dept)]) : Promise.resolve([]),
-    dept ? safeQuery("commandAnnouncements", [F.where("departmentId", "==", dept)]) : Promise.resolve([])
+    safeQuery("commandMeetings", [F.where("visibility", "==", "company")]),
+    dept ? safeQuery("commandAnnouncements", [F.where("departmentId", "==", dept)]) : Promise.resolve([]),
+    safeQuery("commandAnnouncements", [F.where("audience", "==", "company")])
   ]);
 
   const tasks = mergeUnique(tasksAssigned, tasksCreated);
   const tickets = mergeUnique(ticketsRequested, ticketsAssigned);
+  const meetings = mergeUnique(deptMeetings, companyMeetings);
+  const announcements = mergeUnique(deptAnnouncements, companyAnnouncements);
   const openTasks = tasks.filter((item) => isOpen(item.status));
   const openTickets = tickets.filter((item) => isOpen(item.status));
   const openRequests = requests.filter((item) => isOpen(item.status));
   const unread = inbox.filter((item) => !item.readAt);
   const now = Date.now();
   const dueFields = ["dueAt", "dueDate", "dueOn", "deadline"];
-  const overdueTasks = openTasks.filter((item) => { const due = firstTime(item, dueFields); return due && due < now && !sameDay(due); });
+  const overdueTasks = openTasks.filter((item) => {
+    const due = firstTime(item, dueFields);
+    return due && due < now && !sameDay(due);
+  });
   const dueToday = openTasks.filter((item) => sameDay(firstTime(item, dueFields)));
   const pendingLeave = leave.filter((item) => lower(item.status) === "pending");
 
-  const attention = [
+  const allWork = [
     ...openTasks.map((item) => {
       const due = firstTime(item, dueFields);
       const overdue = due && due < now && !sameDay(due);
-      const weight = (overdue ? 100 : 0) + (lower(item.status) === "blocked" ? 70 : 0) + priorityWeight(item.priority);
-      return { ...item, _kind: "Task", _icon: "TK", _href: "#/tasks", _due: due, _weight: weight, _urgent: overdue || lower(item.status) === "blocked" || ["critical", "high", "urgent"].includes(lower(item.priority)) };
+      return {
+        ...item,
+        _kind: "Task",
+        _icon: "TK",
+        _href: "#/tasks",
+        _due: due,
+        _weight: (overdue ? 100 : 0) + (lower(item.status) === "blocked" ? 70 : 0) + priorityWeight(item.priority),
+        _urgent: overdue || lower(item.status) === "blocked" || ["critical", "high", "urgent"].includes(lower(item.priority))
+      };
     }),
-    ...openTickets.map((item) => ({ ...item, _kind: "Ticket", _icon: "TS", _href: "#/tickets", _weight: 35 + priorityWeight(item.priority), _urgent: ["critical", "high", "urgent"].includes(lower(item.priority)) })),
-    ...openRequests.map((item) => ({ ...item, _kind: "Request", _icon: "RQ", _href: "#/requests", _weight: 18 + priorityWeight(item.priority), _urgent: false }))
-  ].sort((a, b) => b._weight - a._weight || firstTime(b, ["updatedAt", "createdAt"]) - firstTime(a, ["updatedAt", "createdAt"])).slice(0, 8);
+    ...openTickets.map((item) => ({
+      ...item,
+      _kind: "Ticket",
+      _icon: "TS",
+      _href: "#/tickets",
+      _weight: 35 + priorityWeight(item.priority),
+      _urgent: ["critical", "high", "urgent"].includes(lower(item.priority))
+    })),
+    ...openRequests.map((item) => ({
+      ...item,
+      _kind: "Request",
+      _icon: "RQ",
+      _href: "#/requests",
+      _weight: 18 + priorityWeight(item.priority),
+      _urgent: false
+    }))
+  ].sort((a, b) => b._weight - a._weight || firstTime(b, ["updatedAt", "createdAt"]) - firstTime(a, ["updatedAt", "createdAt"]));
 
   const upcomingMeetings = meetings
     .filter((item) => lower(item.status) !== "cancelled" && firstTime(item, ["startsAt", "startAt", "scheduledFor", "meetingAt", "date", "createdAt"]) >= now - 15 * 60 * 1000)
@@ -178,26 +222,228 @@ async function loadMyDay(force = false) {
   const data = {
     tasks, tickets, requests, leave, payroll, inbox, meetings, announcements,
     openTasks, openTickets, openRequests, unread, overdueTasks, dueToday, pendingLeave,
-    attention,
+    allWork,
+    attention: allWork.slice(0, 6),
     nextMeeting: upcomingMeetings[0] || null,
+    upcomingMeetings: upcomingMeetings.slice(0, 8),
     latestPayroll: newestFirst(payroll, "periodEnd")[0] || null,
-    latestAnnouncements: newestFirst(announcements, "publishedAt").slice(0, 4)
+    latestAnnouncements: newestFirst(announcements, "publishedAt").slice(0, 6)
   };
+  v4.cache.set(key, { loadedAt: Date.now(), data });
+  return data;
+}
+
+async function loadResources(force = false) {
+  if (!activeStaff()) return null;
+  const key = cacheKey("resources");
+  const existing = v4.cache.get(key);
+  if (!force && existing && Date.now() - existing.loadedAt < 30000) return existing.data;
+  const dept = ownDepartmentId();
+  const F = v4.Fire;
+  const [day, companyDocs, deptDocs] = await Promise.all([
+    loadMyDay(force),
+    safeQuery("commandDocuments", [F.where("visibility", "==", "company")]),
+    dept ? safeQuery("commandDocuments", [F.where("departmentId", "==", dept)]) : Promise.resolve([])
+  ]);
+  const documents = newestFirst(mergeUnique(companyDocs, deptDocs), "updatedAt");
+  const data = { ...day, documents };
   v4.cache.set(key, { loadedAt: Date.now(), data });
   return data;
 }
 
 function workTitle(item) { return item.title || item.subject || item.summary || item.reason || item.cognitusId || item.id || "Work item"; }
 function workDescription(item) { return item.description || item.details || item.body || item.notes || "Open this item for details."; }
-function renderWorkItem(item) {
+function statusPill(item) {
   const status = titleCase(item.status || "open");
   const priority = clean(item.priority || "");
-  const due = item._due ? (item._due < Date.now() && !sameDay(item._due) ? `Overdue · ${formatDate(new Date(item._due))}` : sameDay(item._due) ? "Due today" : `Due ${formatDate(new Date(item._due))}`) : "";
-  return `<a class="v4-work-item" href="${safe(item._href)}"><span class="v4-work-icon">${safe(item._icon)}</span><span class="v4-work-copy"><strong>${safe(workTitle(item))}</strong><span>${safe(clean(workDescription(item)).slice(0, 120))}</span><small>${safe(item._kind)}${due ? ` · ${safe(due)}` : ""}</small></span><span class="v4-work-meta">${item._urgent ? `<span class="v4-pill urgent">Needs attention</span>` : ""}${priority ? `<span class="v4-pill">${safe(priority)}</span>` : ""}<span class="v4-pill">${safe(status)}</span></span></a>`;
+  return `${item._urgent ? `<span class="v4-pill urgent">Needs attention</span>` : ""}${priority ? `<span class="v4-pill">${safe(priority)}</span>` : ""}<span class="v4-pill">${safe(status)}</span>`;
+}
+function dueLabel(item) {
+  if (!item._due) return "";
+  if (item._due < Date.now() && !sameDay(item._due)) return `Overdue · ${formatDate(new Date(item._due))}`;
+  if (sameDay(item._due)) return "Due today";
+  return `Due ${formatDate(new Date(item._due))}`;
+}
+function renderAttentionItem(item) {
+  const due = dueLabel(item);
+  return `<a class="v4-work-item" href="${safe(item._href)}"><span class="v4-work-icon">${safe(item._icon)}</span><span class="v4-work-copy"><strong>${safe(workTitle(item))}</strong><span>${safe(clean(workDescription(item)).slice(0, 120))}</span><small>${safe(item._kind)}${due ? ` · ${safe(due)}` : ""}</small></span><span class="v4-work-meta">${statusPill(item)}</span></a>`;
+}
+function renderWorkCenterRow(item) {
+  const due = dueLabel(item);
+  const canComplete = item._kind === "Task" && !CLOSED.has(lower(item.status));
+  return `<article class="v4-work-row"><span class="v4-work-icon">${safe(item._icon)}</span><div class="v4-work-copy"><strong>${safe(workTitle(item))}</strong><span>${safe(clean(workDescription(item)).slice(0, 180))}</span><small>${safe(item._kind)}${due ? ` · ${safe(due)}` : ""}</small></div><div class="v4-work-row-meta">${statusPill(item)}</div><div class="v4-work-row-actions"><a class="button button-small" href="${safe(item._href)}">Open</a>${canComplete ? `<button class="button button-small button-dark" type="button" data-v4-complete-task="${safe(item.id)}">Done</button>` : ""}</div></article>`;
 }
 function emptyMini(title, body) { return `<div class="v4-empty"><strong>${safe(title)}</strong><p>${safe(body)}</p></div>`; }
 function launch(title, description, href, icon, external = false) {
   return `<a class="v4-launch" href="${safe(href)}" ${external ? 'target="_blank" rel="noopener"' : ""}><span class="v4-launch-icon">${safe(icon)}</span><span><strong>${safe(title)}</strong><small>${safe(description)}</small></span><b>→</b></a>`;
+}
+function viewHeader(eyebrow, title, description, actions = "") {
+  return `<header class="v4-view-header"><div><p class="eyebrow">${safe(eyebrow)}</p><h1>${safe(title)}</h1><p>${safe(description)}</p></div>${actions ? `<div class="v4-view-actions">${actions}</div>` : ""}</header>`;
+}
+
+function leadershipDestinations() {
+  const items = [];
+  if (owner() || canAny([PERMISSIONS.HR_RECORDS_READ, PERMISSIONS.HR_RECORDS_MANAGE, PERMISSIONS.STAFF_MANAGE])) {
+    items.push(["HR", "Human Resources", "Employee lifecycle, leave review, and people operations.", "#/hr/lifecycle"]);
+  }
+  if (owner() || canAny([PERMISSIONS.FINANCE_READ, PERMISSIONS.FINANCE_MANAGE, PERMISSIONS.PAYROLL_READ, PERMISSIONS.PAYROLL_MANAGE, PERMISSIONS.PAYROLL_APPROVE])) {
+    items.push(["FN", "Finance & Payroll", "Financial operations, payroll records, and approvals.", "#/finance"]);
+  }
+  if (owner() || canAny([PERMISSIONS.QA_READ, PERMISSIONS.QA_MANAGE, PERMISSIONS.QA_AUDIT])) {
+    items.push(["QA", "Quality Assurance", "Reviews, findings, audits, and corrective action.", "#/quality"]);
+  }
+  if (owner() || canAny([PERMISSIONS.PR_MANAGE, PERMISSIONS.PR_APPROVE])) {
+    items.push(["PR", "Public Relations", "Campaigns, publications, media, and partnerships.", "#/public-relations"]);
+  }
+  if (owner() || canAny([PERMISSIONS.CS_MANAGE, PERMISSIONS.TICKETS_MANAGE])) {
+    items.push(["CS", "Customer Service", "Service analytics, queue management, and saved responses.", "#/customer-service"]);
+  }
+  if (owner() || canAny([PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE])) {
+    items.push(["SA", "Staff Administration", "Provision staff access and manage internal staff records.", "#/admin/staff"]);
+  }
+  const commandAccess = owner() || canAny([
+    PERMISSIONS.REPORTS_REVIEW, PERMISSIONS.CLAIMS_REVIEW, PERMISSIONS.APPEALS_REVIEW,
+    PERMISSIONS.ORGANIZATIONS_REVIEW, PERMISSIONS.VERIFICATION_REVIEW,
+    PERMISSIONS.CASES_READ, PERMISSIONS.CASES_MANAGE,
+    PERMISSIONS.EVIDENCE_READ, PERMISSIONS.EVIDENCE_MANAGE,
+    PERMISSIONS.ACCREDITATION_MANAGE, PERMISSIONS.ESCALATIONS_MANAGE,
+    PERMISSIONS.INCIDENTS_MANAGE
+  ]);
+  if (commandAccess) items.push(["CM", "Command Operations", "Reviews, cases, escalations, evidence, incidents, and other judgment-based work.", "#/command"]);
+  if (owner() || canAny([PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ, PERMISSIONS.ACCOUNTS_READ_ALL])) {
+    items.push(["EX", "Executive Command", "Company-wide operating picture, accounts, approvals, and audit.", "#/executive"]);
+  }
+  return items;
+}
+
+async function completeTask(id) {
+  if (!id) return;
+  try {
+    await v4.Fire.updateDoc(v4.Fire.doc(v4.db, "commandTasks", id), {
+      status: "done",
+      completedAt: v4.Fire.serverTimestamp(),
+      updatedAt: v4.Fire.serverTimestamp()
+    });
+    v4.cache.clear();
+    await renderDashboard(true);
+  } catch (error) {
+    console.warn("Task could not be completed", error);
+    alert(error?.message || "This task could not be marked complete.");
+  }
+}
+
+function bindTaskActions() {
+  root.querySelectorAll("[data-v4-complete-task]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Saving…";
+    await completeTask(button.dataset.v4CompleteTask);
+  }));
+}
+
+async function renderHome(data) {
+  const dept = ownDepartment();
+  const roster = v4.directory.filter((person) => person.departmentId === dept.id && ["active", "training", "on_leave"].includes(person.status));
+  const displayName = v4.directorySelf?.displayName || v4.userRecord?.displayName || "Cognitus Staff";
+  const firstName = clean(displayName).split(/\s+/)[0] || displayName;
+  const meeting = data.nextMeeting;
+  const meetingTime = meeting ? firstTime(meeting, ["startsAt", "startAt", "scheduledFor", "meetingAt", "date", "createdAt"]) : 0;
+  const urgentCount = data.overdueTasks.length + data.openTickets.filter((item) => ["critical", "high", "urgent"].includes(lower(item.priority))).length;
+
+  document.title = "My Day · Cognitus Staff / Command";
+  root.innerHTML = `<div class="page-inner v4-day" data-v4-dashboard>
+    <section class="v4-day-hero compact">
+      <div class="v4-day-copy"><p class="eyebrow">${safe(dept.name)} · ${safe(rankLabel())}</p><h1>${safe(relativeGreeting())}, ${safe(firstName)}.</h1><p>${safe(todayLabel())}. Everything important is here first: work that needs you, your next meeting, company updates, and the few systems you actually use.</p><div class="v4-day-actions"><a class="button button-dark" href="${dashboardHref("work")}">Open Work Center</a><a class="button" href="#/department-command">My Department</a><a class="button" href="#/tickets?action=new">Open Ticket</a></div></div>
+      <aside class="v4-day-side"><span>Next up</span><div>${meeting ? `<strong>${safe(meeting.title || meeting.subject || "Meeting")}</strong><p>${safe(formatTimestamp(new Date(meetingTime)))}${meeting.location ? ` · ${safe(meeting.location)}` : ""}</p>` : `<strong>Schedule clear.</strong><p>No upcoming company or department meeting is currently on your calendar.</p>`}</div><div class="v4-side-bottom"><small>${safe(v4.directorySelf?.employeeId || v4.staffAccess?.employeeId || "Staff access active")} · ${safe(dept.code)}</small><button class="v4-refresh" id="v4-refresh-day" type="button">Refresh</button></div></aside>
+    </section>
+
+    <section class="v4-kpis concise">
+      <a class="v4-kpi ${urgentCount ? "attention" : ""}" href="${dashboardHref("work")}"><span>Needs attention</span><strong>${urgentCount}</strong><small>Overdue work and high-priority tickets</small></a>
+      <a class="v4-kpi" href="${dashboardHref("work", "&kind=tasks")}"><span>Open tasks</span><strong>${data.openTasks.length}</strong><small>${data.dueToday.length} due today · ${data.overdueTasks.length} overdue</small></a>
+      <a class="v4-kpi" href="${dashboardHref("work", "&kind=tickets")}"><span>Tickets</span><strong>${data.openTickets.length}</strong><small>Assigned to or requested by you</small></a>
+      <a class="v4-kpi" href="#/inbox"><span>Inbox</span><strong>${data.unread.length}</strong><small>Unread staff notifications</small></a>
+    </section>
+
+    <section class="v4-home-grid">
+      <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Priority</p><h2>Needs your attention</h2></div><a href="${dashboardHref("work")}">Work Center →</a></header><div class="v4-panel-body">${data.attention.length ? `<div class="v4-attention-list">${data.attention.map(renderAttentionItem).join("")}</div>` : emptyMini("You are clear", "No open task, ticket, or request currently needs your attention.")}</div></section>
+      <aside class="v4-stack">
+        <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Go to</p><h3>Core systems</h3></div></header><div class="v4-panel-body"><div class="v4-launch-grid core">
+          ${launch("Work Center", "Tasks, tickets, requests, and schedule", dashboardHref("work"), "WK")}
+          ${launch("My Department", `${dept.shortName} workspace`, "#/department-command", dept.code?.slice(0,2) || "DP")}
+          ${launch("People", `${roster.length} visible department staff`, "#/directory", "PE")}
+          ${launch("Resources", "Documents, announcements, payroll, leave", dashboardHref("resources"), "RS")}
+        </div></div></section>
+        <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Company updates</p><h3>Latest</h3></div><a href="${dashboardHref("resources")}">All resources →</a></header><div>${data.latestAnnouncements.length ? data.latestAnnouncements.slice(0,3).map((item) => `<article class="v4-announcement"><strong>${safe(item.title || item.subject || "Announcement")}</strong><p>${safe(clean(item.body || item.message || item.description || "").slice(0, 160))}</p><small>${safe(formatTimestamp(item.publishedAt || item.createdAt))}</small></article>`).join("") : `<div class="v4-empty-mini">No current company or department announcements.</div>`}</div></section>
+      </aside>
+    </section>
+  </div>`;
+
+  root.querySelector("#v4-refresh-day")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+    v4.cache.clear();
+    await renderDashboard(true);
+  });
+}
+
+async function renderWorkCenter(data) {
+  document.title = "Work Center · Cognitus Staff / Command";
+  const kind = workKind();
+  const kindMap = { tasks: "Task", tickets: "Ticket", requests: "Request" };
+  const filtered = kindMap[kind] ? data.allWork.filter((item) => item._kind === kindMap[kind]) : data.allWork;
+  const filters = [["all", "All", data.allWork.length], ["tasks", "Tasks", data.openTasks.length], ["tickets", "Tickets", data.openTickets.length], ["requests", "Requests", data.openRequests.length]];
+
+  root.innerHTML = `<div class="page-inner v4-view" data-v4-dashboard>
+    ${viewHeader("Workspace", "Work Center.", "One queue for the work you actually need to act on. Tasks, tickets, requests, and your schedule stay in their existing systems, but you do not have to hunt through the portal to find them.", `<a class="button button-dark" href="#/tasks?action=new">New Task</a><a class="button" href="#/tickets?action=new">Open Ticket</a>`)}
+    <nav class="v4-segmented" aria-label="Work filters">${filters.map(([id,label,count]) => `<a class="${kind === id || (kind === "all" && id === "all") ? "active" : ""}" href="${dashboardHref("work", `&kind=${id}`)}"><span>${safe(label)}</span><b>${count}</b></a>`).join("")}</nav>
+    <section class="v4-work-layout">
+      <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Queue</p><h2>${kind === "all" ? "All open work" : `${safe(titleCase(kind))}`}</h2></div><span>${filtered.length} open</span></header><div class="v4-panel-body flush">${filtered.length ? `<div class="v4-work-center-list">${filtered.map(renderWorkCenterRow).join("")}</div>` : emptyMini("Nothing open here", "This part of your queue is clear.")}</div></section>
+      <aside class="v4-stack">
+        <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Create</p><h3>Start something</h3></div></header><div class="v4-panel-body"><div class="v4-launch-grid one">
+          ${launch("New Task", "Create or delegate work", "#/tasks?action=new", "TK")}
+          ${launch("New Request", "Submit an internal request", "#/requests?action=new", "RQ")}
+          ${launch("Open Ticket", "Ask for operational support", "#/tickets?action=new", "TS")}
+          ${launch("Request Leave", "Submit time away", "#/leave?action=new", "LV")}
+        </div></div></section>
+        <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Schedule</p><h3>Upcoming</h3></div><a href="#/meetings">Meetings →</a></header><div class="v4-panel-body">${data.upcomingMeetings.length ? data.upcomingMeetings.slice(0,4).map((item) => { const when = firstTime(item, ["startsAt","startAt","scheduledFor","meetingAt","date","createdAt"]); return `<a class="v4-mini-row" href="#/meetings"><strong>${safe(item.title || item.subject || "Meeting")}</strong><span>${safe(formatTimestamp(new Date(when)))}</span></a>`; }).join("") : emptyMini("No meetings", "Nothing upcoming on your visible schedule.")}</div></section>
+        <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">More workspaces</p><h3>When you need them</h3></div></header><div class="v4-panel-body"><div class="v4-inline-links"><a href="#/projects">Projects</a><a href="#/meetings">Meetings</a><a href="#/requests">Requests</a><a href="#/tickets">Service Desk</a></div></div></section>
+      </aside>
+    </section>
+  </div>`;
+  bindTaskActions();
+}
+
+async function renderResources() {
+  const data = await loadResources();
+  if (!data) return;
+  document.title = "Resources · Cognitus Staff / Command";
+  const payrollLabel = data.latestPayroll?.periodLabel || data.latestPayroll?.statementLabel || "View payroll";
+  root.innerHTML = `<div class="page-inner v4-view" data-v4-dashboard>
+    ${viewHeader("Staff hub", "Resources.", "The things employees need occasionally—documents, company updates, leave, payroll, profile, and external Cognitus systems—without turning each one into permanent navigation clutter.")}
+    <section class="v4-resource-grid">
+      <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Documents</p><h2>Policies, forms & guides</h2></div><a href="#/documents">Library →</a></header><div class="v4-panel-body flush">${data.documents.length ? data.documents.slice(0,10).map((item) => `<a class="v4-resource-row" href="${safe(item.url || "#/documents")}" ${item.url ? 'target="_blank" rel="noopener"' : ""}><span class="v4-work-icon">DC</span><span><strong>${safe(item.title || "Document")}</strong><small>${safe(titleCase(item.category || item.visibility || "resource"))}${item.description ? ` · ${safe(clean(item.description).slice(0,90))}` : ""}</small></span><b>→</b></a>`).join("") : emptyMini("No documents available", "Company and department resources will appear here when published.")}</div></section>
+      <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Announcements</p><h2>Company updates</h2></div><a href="#/announcements">All announcements →</a></header><div>${data.latestAnnouncements.length ? data.latestAnnouncements.map((item) => `<article class="v4-announcement roomy"><strong>${safe(item.title || item.subject || "Announcement")}</strong><p>${safe(clean(item.body || item.message || item.description || "").slice(0,260))}</p><small>${safe(formatTimestamp(item.publishedAt || item.createdAt))}</small></article>`).join("") : `<div class="v4-empty-mini">No current company or department announcements.</div>`}</div></section>
+    </section>
+    <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Employee services</p><h2>Everything else</h2></div></header><div class="v4-panel-body"><div class="v4-launch-grid services">
+      ${launch("Employee Profile", `${rankLabel()} · ${ownDepartment().shortName}`, "#/profile", "ME")}
+      ${launch("Leave", `${data.pendingLeave.length} pending request${data.pendingLeave.length === 1 ? "" : "s"}`, "#/leave", "LV")}
+      ${launch("Payroll", payrollLabel, "#/payroll", "PY")}
+      ${launch("Meetings", "Company and department schedule", "#/meetings", "MT")}
+      ${launch("Inbox", `${data.unread.length} unread notification${data.unread.length === 1 ? "" : "s"}`, "#/inbox", "IN")}
+      ${launch("Talent Gateway", "Hiring and applications", CAREERS_URL, "TG", true)}
+      ${launch("Main Cognitus", "Return to the main product", MAIN_URL, "↗", true)}
+    </div></div></section>
+  </div>`;
+}
+
+async function renderLeadership() {
+  const items = leadershipDestinations();
+  document.title = "Leadership Hub · Cognitus Staff / Command";
+  root.innerHTML = `<div class="page-inner v4-view" data-v4-dashboard>
+    ${viewHeader("Permission-based", "Leadership Hub.", "Management and Command systems only appear here when your staff permissions require them. Routine staff navigation stays clean, while specialized tools remain available without changing the Firestore data model.")}
+    ${items.length ? `<section class="v4-system-grid">${items.map(([icon,title,desc,href]) => `<a class="v4-system-card" href="${safe(href)}"><span class="v4-system-icon">${safe(icon)}</span><div><strong>${safe(title)}</strong><p>${safe(desc)}</p></div><b>→</b></a>`).join("")}</section>` : emptyMini("No leadership systems assigned", "Your current staff role does not require management or Command workspaces.")}
+    <section class="v4-rules-note"><div><span>Firestore strategy</span><h3>No new rules for this redesign.</h3><p>Home, Work Center, Resources, and Leadership Hub reuse the collections and permissions Cognitus already has. New UI views do not create new Firestore collections, role types, or composite indexes.</p></div><a class="button" href="#/profile">View my access</a></section>
+  </div>`;
 }
 
 async function renderDashboard(force = false) {
@@ -207,104 +453,39 @@ async function renderDashboard(force = false) {
   try {
     const data = await loadMyDay(force);
     if (token !== v4.renderToken || !["/", "/dashboard"].includes(route()) || !data) return;
-    const dept = ownDepartment();
-    const roster = v4.directory.filter((person) => person.departmentId === dept.id && ["active", "training", "on_leave"].includes(person.status));
-    const displayName = v4.directorySelf?.displayName || v4.userRecord?.displayName || "Cognitus Staff";
-    const firstName = clean(displayName).split(/\s+/)[0] || displayName;
-    const meeting = data.nextMeeting;
-    const meetingTime = meeting ? firstTime(meeting, ["startsAt", "startAt", "scheduledFor", "meetingAt", "date", "createdAt"]) : 0;
-    const urgentCount = data.overdueTasks.length + data.openTickets.filter((item) => ["critical", "high", "urgent"].includes(lower(item.priority))).length;
-    const executive = owner() || canAny([PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ]);
-
-    root.innerHTML = `<div class="page-inner v4-day" data-v4-dashboard>
-      <section class="v4-day-hero">
-        <div class="v4-day-copy"><p class="eyebrow">${safe(dept.name)} · ${safe(rankLabel())}</p><h1>${safe(relativeGreeting())}, ${safe(firstName)}.</h1><p>${safe(todayLabel())}. Staff Command now starts with the work that needs you—not system statistics. Your tasks, tickets, requests, meetings, notices, and staff services are brought into one operating view.</p><div class="v4-day-actions"><a class="button button-dark" href="#/tasks?action=new">New Task</a><a class="button" href="#/tickets?action=new">Open Ticket</a><a class="button" href="#/department-command">My Department</a></div></div>
-        <aside class="v4-day-side"><span>Next up</span><div>${meeting ? `<strong>${safe(meeting.title || meeting.subject || "Department meeting")}</strong><p>${safe(formatTimestamp(new Date(meetingTime)))}${meeting.location ? ` · ${safe(meeting.location)}` : ""}</p>` : `<strong>Your schedule is clear.</strong><p>No upcoming department meeting is currently on your Command schedule.</p>`}</div><div class="v4-side-bottom"><small>${safe(v4.directorySelf?.employeeId || v4.staffAccess?.employeeId || "Staff access active")} · ${safe(dept.code)}</small><button class="v4-refresh" id="v4-refresh-day" type="button">Refresh my day</button></div></aside>
-      </section>
-
-      <section class="v4-kpis">
-        <article class="v4-kpi ${urgentCount ? "attention" : ""}"><span>Needs attention</span><strong>${urgentCount}</strong><small>Overdue work and high-priority tickets</small></article>
-        <article class="v4-kpi"><span>Open tasks</span><strong>${data.openTasks.length}</strong><small>${data.dueToday.length} due today · ${data.overdueTasks.length} overdue</small></article>
-        <article class="v4-kpi"><span>Tickets</span><strong>${data.openTickets.length}</strong><small>Requested by or assigned to you</small></article>
-        <article class="v4-kpi"><span>Requests</span><strong>${data.openRequests.length}</strong><small>Internal requests still in motion</small></article>
-        <article class="v4-kpi"><span>Inbox</span><strong>${data.unread.length}</strong><small>Unread Command notifications</small></article>
-        <article class="v4-kpi"><span>Leave</span><strong>${data.pendingLeave.length}</strong><small>Pending time-away requests</small></article>
-      </section>
-
-      ${executive ? `<section class="v4-executive-callout"><div><h3>Leadership workspace</h3><p>Your account can open the company-wide operating picture, approvals, and audit tools.</p></div><div class="button-row"><a class="button" href="#/executive">Executive Command</a><a class="button" href="#/executive/approvals">Approvals</a></div></section>` : ""}
-
-      <section class="v4-day-grid">
-        <div class="v4-stack">
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Priority</p><h2>Needs your attention</h2></div><a href="#/tasks">Open all work →</a></header><div class="v4-panel-body">${data.attention.length ? `<div class="v4-attention-list">${data.attention.map(renderWorkItem).join("")}</div>` : emptyMini("You are clear", "No open task, ticket, or request currently needs your attention.")}</div></section>
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Quick launch</p><h3>Staff services</h3></div></header><div class="v4-panel-body"><div class="v4-launch-grid">
-            ${launch("Tasks", "Assignments and work queue", "#/tasks", "TK")}${launch("Requests", "Internal requests and approvals", "#/requests", "RQ")}${launch("Service Desk", "Support and operational tickets", "#/tickets", "TS")}${launch("Meetings", "Company and department schedule", "#/meetings", "MT")}
-            ${launch("Documents", "Policies, forms, and resources", "#/documents", "DC")}${launch("Leave", "Time-away requests", "#/leave", "LV")}${launch("Payroll", data.latestPayroll ? (data.latestPayroll.periodLabel || "Latest statement available") : "Statements and payroll records", "#/payroll", "PY")}${launch("Talent Gateway", "Hiring and applications", CAREERS_URL, "TG", true)}
-          </div></div></section>
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Team</p><h3>${safe(dept.shortName)} at a glance</h3></div><a href="#/directory">Directory →</a></header>${roster.length ? `<div class="v4-team-strip">${roster.slice(0, 12).map((person) => `<a class="v4-person" href="#/staff/${safe(person.uid || person.id)}"><span class="avatar">${safe(initials(person.displayName || person.discordUsername || "CS"))}</span><span><strong>${safe(person.displayName || person.discordUsername || "Cognitus Staff")}</strong><small>${safe(person.title || getRank(person.rank).label)}</small></span></a>`).join("")}</div>` : emptyMini("No team records", "Department staff will appear here when directory records are available.")}</section>
-        </div>
-        <aside class="v4-stack">
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Schedule</p><h3>Next meeting</h3></div><a href="#/meetings">Calendar →</a></header><div class="v4-panel-body">${meeting ? `<div class="v4-meeting-card"><span>${safe(formatDate(new Date(meetingTime)))}</span><strong>${safe(meeting.title || meeting.subject || "Department meeting")}</strong><p>${safe(formatTimestamp(new Date(meetingTime)))}${meeting.location ? `<br>${safe(meeting.location)}` : ""}</p><a href="#/meetings">View schedule →</a></div>` : emptyMini("No meeting scheduled", "Your next department meeting will appear here automatically.")}</div></section>
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Company</p><h3>Announcements</h3></div><a href="#/announcements">View all →</a></header><div>${data.latestAnnouncements.length ? data.latestAnnouncements.map((item) => `<article class="v4-announcement"><strong>${safe(item.title || item.subject || "Announcement")}</strong><p>${safe(clean(item.body || item.message || item.description || "").slice(0, 180))}</p><small>${safe(formatTimestamp(item.publishedAt || item.createdAt))}</small></article>`).join("") : `<div class="v4-empty-mini">No department announcements are currently available.</div>`}</div></section>
-          <section class="v4-panel"><header class="v4-panel-head"><div><p class="eyebrow">Employee</p><h3>Your profile</h3></div><a href="#/profile">Open →</a></header><div class="v4-panel-body">${launch("Employee Profile", `${rankLabel()} · ${dept.name}`, "#/profile", initials(displayName))}${launch("Main Cognitus", "Return to the public/product portal", MAIN_URL, "↗", true)}</div></section>
-        </aside>
-      </section>
-    </div>`;
-
-    root.querySelector("#v4-refresh-day")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true; button.textContent = "Refreshing…";
-      v4.cache.delete(cacheKey());
-      await renderDashboard(true);
-    });
+    const view = dashboardView();
+    if (view === "work") await renderWorkCenter(data);
+    else if (view === "resources") await renderResources();
+    else if (view === "leadership") await renderLeadership();
+    else await renderHome(data);
     syncTopbar();
   } catch (error) {
-    console.error("V4 My Day dashboard unavailable", error);
+    console.error("V4 dashboard unavailable", error);
   } finally {
     v4.dashboardRendering = false;
   }
 }
 
+function hrefTarget(href) {
+  return href.replace(/^#/, "");
+}
+function navIsActive(href, external = false) {
+  if (external) return false;
+  const target = hrefTarget(href);
+  if (target.startsWith("/dashboard?")) {
+    const query = target.split("?")[1] || "";
+    const params = new URLSearchParams(query);
+    return route() === "/dashboard" && dashboardView() === (params.get("view") || "home");
+  }
+  if (target === "/dashboard") return route() === "/dashboard" && dashboardView() === "home";
+  return route() === target || route().startsWith(`${target}/`);
+}
 function navLink(href, label, icon, external = false) {
-  const active = !external && (route() === href.replace(/^#/, "") || route().startsWith(`${href.replace(/^#/, "")}/`));
-  return `<a class="sidebar-link ${active ? "active" : ""} ${external ? "v4-external-link" : ""}" href="${safe(href)}" ${external ? 'target="_blank" rel="noopener"' : ""}><span class="sidebar-link-icon">${safe(icon)}</span><span>${safe(label)}</span></a>`;
+  return `<a class="sidebar-link ${navIsActive(href, external) ? "active" : ""} ${external ? "v4-external-link" : ""}" href="${safe(href)}" ${external ? 'target="_blank" rel="noopener"' : ""}><span class="sidebar-link-icon">${safe(icon)}</span><span>${safe(label)}</span></a>`;
 }
 function navGroup(label, links) {
   const filtered = links.filter(Boolean);
   return filtered.length ? `<section class="sidebar-group v4-sidebar-group"><span class="sidebar-label">${safe(label)}</span>${filtered.join("")}</section>` : "";
-}
-function leadershipLinks() {
-  const links = [];
-  if (canAny([PERMISSIONS.HR_RECORDS_READ, PERMISSIONS.HR_RECORDS_MANAGE, PERMISSIONS.STAFF_MANAGE])) links.push(navLink("#/hr/lifecycle", "Employee Lifecycle", "HR"));
-  if (canAny([PERMISSIONS.FINANCE_READ, PERMISSIONS.FINANCE_MANAGE])) links.push(navLink("#/finance", "Finance", "FN"));
-  if (canAny([PERMISSIONS.QA_READ, PERMISSIONS.QA_MANAGE, PERMISSIONS.QA_AUDIT])) links.push(navLink("#/quality", "Quality Assurance", "QA"));
-  if (canAny([PERMISSIONS.PR_MANAGE, PERMISSIONS.PR_APPROVE])) links.push(navLink("#/public-relations", "Public Relations", "PR"));
-  if (canAny([PERMISSIONS.CS_MANAGE, PERMISSIONS.TICKETS_MANAGE])) links.push(navLink("#/customer-service", "Customer Service", "CS"));
-  if (owner() || canAny([PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE])) links.push(navLink("#/admin/staff", "Staff Administration", "SA"));
-  return links;
-}
-function commandLinks() {
-  const links = [];
-  const commandAccess = owner() || canAny([
-    PERMISSIONS.REPORTS_REVIEW, PERMISSIONS.CLAIMS_REVIEW, PERMISSIONS.APPEALS_REVIEW,
-    PERMISSIONS.ORGANIZATIONS_REVIEW, PERMISSIONS.CASES_READ, PERMISSIONS.CASES_MANAGE,
-    PERMISSIONS.EVIDENCE_READ, PERMISSIONS.EVIDENCE_MANAGE, PERMISSIONS.ACCREDITATION_MANAGE,
-    PERMISSIONS.ESCALATIONS_MANAGE, PERMISSIONS.INCIDENTS_MANAGE, PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ
-  ]);
-  if (commandAccess) links.push(navLink("#/command", "Command Overview", "CM"));
-  if (can(PERMISSIONS.REPORTS_REVIEW)) links.push(navLink("#/command/reports", "Report Review", "RP"));
-  if (can(PERMISSIONS.CLAIMS_REVIEW)) links.push(navLink("#/command/claims", "Claims", "CL"));
-  if (can(PERMISSIONS.APPEALS_REVIEW)) links.push(navLink("#/command/appeals", "Appeals", "AP"));
-  if (canAny([PERMISSIONS.ORGANIZATIONS_REVIEW, PERMISSIONS.VERIFICATION_REVIEW])) links.push(navLink("#/command/organizations", "Organization Review", "OR"));
-  if (canAny([PERMISSIONS.CASES_READ, PERMISSIONS.CASES_MANAGE])) links.push(navLink("#/command/cases", "Case Files", "CF"));
-  if (canAny([PERMISSIONS.EVIDENCE_READ, PERMISSIONS.EVIDENCE_MANAGE])) links.push(navLink("#/command/evidence", "Evidence", "EV"));
-  if (can(PERMISSIONS.ACCREDITATION_MANAGE)) links.push(navLink("#/command/accreditation", "Accreditation", "AC"));
-  if (can(PERMISSIONS.ESCALATIONS_MANAGE)) links.push(navLink("#/command/escalations", "Escalations", "ES"));
-  if (can(PERMISSIONS.INCIDENTS_MANAGE)) links.push(navLink("#/command/incidents", "Incidents", "IC"));
-  if (owner() || canAny([PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ])) links.push(navLink("#/executive", "Executive Command", "EX"));
-  if (owner() || can(PERMISSIONS.ACCOUNTS_READ_ALL)) links.push(navLink("#/executive/accounts", "All Accounts", "UA"));
-  if (owner() || can(PERMISSIONS.SYSTEM_MANAGE)) links.push(navLink("#/executive/approvals", "Executive Approvals", "EA"));
-  if (owner() || can(PERMISSIONS.AUDIT_READ)) links.push(navLink("#/executive/audit", "Audit Center", "AU"));
-  return links;
 }
 
 function syncSidebar() {
@@ -318,27 +499,33 @@ function syncSidebar() {
       shell.className = "v4-nav-shell";
       shell.dataset.v4Nav = "";
       const divider = sidebar.querySelector(".sidebar-divider");
-      if (divider) sidebar.insertBefore(shell, divider); else sidebar.prepend(shell);
+      if (divider) sidebar.insertBefore(shell, divider);
+      else sidebar.prepend(shell);
     }
-    const lead = leadershipLinks();
-    const command = commandLinks();
+    const leadership = leadershipDestinations();
     shell.innerHTML = [
-      navGroup("Workspace", [navLink("#/dashboard", "My Day", "HM"), navLink("#/department-command", "My Department", ownDepartment().code?.slice(0,2) || "DP"), navLink("#/inbox", "Inbox", "IN")]),
-      navGroup("My Work", [navLink("#/tasks", "Tasks", "TK"), navLink("#/requests", "Requests", "RQ"), navLink("#/projects", "Projects", "PJ"), navLink("#/meetings", "Meetings", "MT")]),
-      navGroup("Staff Services", [navLink("#/tickets", "Service Desk", "TS"), navLink("#/announcements", "Announcements", "AN"), navLink("#/documents", "Documents", "DC"), navLink("#/leave", "Leave", "LV"), navLink("#/payroll", "Payroll", "PY")]),
-      navGroup("Company", [can(PERMISSIONS.DIRECTORY_READ) ? navLink("#/directory", "Staff Directory", "SD") : "", can(PERMISSIONS.DEPARTMENT_READ) ? navLink("#/departments", "Departments", "DP") : "", navLink("#/profile", "My Profile", "ME")]),
-      lead.length ? `<details class="v4-nav-details" open><summary>Leadership</summary>${lead.join("")}</details>` : "",
-      command.length ? `<details class="v4-nav-details"><summary>Command & Executive</summary>${command.join("")}</details>` : "",
-      navGroup("Cognitus", [navLink(MAIN_URL, "Main Cognitus", "↗", true), navLink(CAREERS_URL, "Talent Gateway", "TG", true)])
+      navGroup("Workspace", [
+        navLink("#/dashboard", "Home", "HM"),
+        navLink(dashboardHref("work"), "Work Center", "WK"),
+        navLink("#/department-command", "My Department", ownDepartment().code?.slice(0,2) || "DP"),
+        can(PERMISSIONS.DIRECTORY_READ) ? navLink("#/directory", "People", "PE") : "",
+        navLink(dashboardHref("resources"), "Resources", "RS"),
+        navLink("#/inbox", "Inbox", "IN")
+      ]),
+      leadership.length ? navGroup("Management", [navLink(dashboardHref("leadership"), "Leadership Hub", "LD")]) : ""
     ].join("");
-  } finally { v4.sidebarSyncing = false; }
+  } finally {
+    v4.sidebarSyncing = false;
+  }
 }
 
 function ensurePopover(id) {
   let element = document.querySelector(`#${id}`);
   if (!element) {
     element = document.createElement("div");
-    element.id = id; element.className = "v4-popover"; element.hidden = true;
+    element.id = id;
+    element.className = "v4-popover";
+    element.hidden = true;
     document.body.appendChild(element);
   }
   return element;
@@ -352,20 +539,21 @@ function positionPopover(element, trigger) {
   element.style.top = `${Math.min(window.innerHeight - 90, rect.bottom + 8)}px`;
 }
 function closePopovers(except = "") {
-  ["v4-create-popover", "v4-notification-popover", "v4-account-popover"].forEach((id) => { if (id !== except) { const el = document.querySelector(`#${id}`); if (el) el.hidden = true; } });
+  ["v4-create-popover", "v4-notification-popover", "v4-account-popover"].forEach((id) => {
+    if (id !== except) {
+      const el = document.querySelector(`#${id}`);
+      if (el) el.hidden = true;
+    }
+  });
 }
 function createMenuHtml() {
   const items = [
     ["TK", "New Task", "Create or delegate work", "#/tasks?action=new"],
     ["RQ", "New Request", "Submit an internal request", "#/requests?action=new"],
     ["TS", "Open Ticket", "Request operational support", "#/tickets?action=new"],
-    ["LV", "Request Leave", "Submit time away", "#/leave?action=new"],
-    ["PJ", "New Project", "Start a department initiative", "#/projects?action=new"],
-    ["MT", "Schedule Meeting", "Add a company or department meeting", "#/meetings?action=new"],
-    ["AN", "Announcement", "Publish a staff notice", "#/announcements?action=new"],
-    ["DC", "Add Document", "Add an internal resource", "#/documents?action=new"]
+    ["LV", "Request Leave", "Submit time away", "#/leave?action=new"]
   ];
-  return `<div class="v4-popover-head"><strong>Create</strong><button type="button" data-v4-close>Create menu</button></div><div class="v4-menu-list">${items.map(([icon,title,desc,href]) => `<a class="v4-menu-link" href="${href}"><span>${icon}</span><span class="v4-menu-copy"><strong>${title}</strong><small>${desc}</small></span></a>`).join("")}</div>`;
+  return `<div class="v4-popover-head"><strong>Create</strong><button type="button" data-v4-close>Close</button></div><div class="v4-menu-list">${items.map(([icon,title,desc,href]) => `<a class="v4-menu-link" href="${href}"><span>${icon}</span><span class="v4-menu-copy"><strong>${title}</strong><small>${desc}</small></span></a>`).join("")}</div><div class="v4-menu-separator"></div><a class="v4-menu-link" href="${dashboardHref("work")}"><span>WK</span><span class="v4-menu-copy"><strong>Work Center</strong><small>Projects, meetings, and the rest of your work tools</small></span></a>`;
 }
 async function notificationMenuHtml() {
   const data = await loadMyDay();
@@ -375,7 +563,8 @@ async function notificationMenuHtml() {
 function accountMenuHtml() {
   const dept = ownDepartment();
   const name = v4.directorySelf?.displayName || v4.userRecord?.displayName || "Cognitus Staff";
-  return `<div class="v4-popover-head"><strong>${safe(name)}</strong><button type="button" data-v4-close>Close</button></div><div class="v4-menu-list"><a class="v4-menu-link" href="#/profile"><span>ME</span><span class="v4-menu-copy"><strong>Employee Profile</strong><small>${safe(rankLabel())} · ${safe(dept.shortName)}</small></span></a><a class="v4-menu-link" href="${MAIN_URL}" target="_blank" rel="noopener"><span>↗</span><span class="v4-menu-copy"><strong>Main Cognitus</strong><small>Open the public/product portal</small></span></a><a class="v4-menu-link" href="${CAREERS_URL}" target="_blank" rel="noopener"><span>TG</span><span class="v4-menu-copy"><strong>Talent Gateway</strong><small>Careers, applications, and hiring</small></span></a><div class="v4-menu-separator"></div><button class="v4-menu-button" type="button" data-v4-signout><span>SO</span><span class="v4-menu-copy"><strong>Sign out</strong><small>End this Staff / Command session</small></span></button></div>`;
+  const leadership = leadershipDestinations();
+  return `<div class="v4-popover-head"><strong>${safe(name)}</strong><button type="button" data-v4-close>Close</button></div><div class="v4-menu-list"><a class="v4-menu-link" href="#/profile"><span>ME</span><span class="v4-menu-copy"><strong>Employee Profile</strong><small>${safe(rankLabel())} · ${safe(dept.shortName)}</small></span></a>${leadership.length ? `<a class="v4-menu-link" href="${dashboardHref("leadership")}"><span>LD</span><span class="v4-menu-copy"><strong>Leadership Hub</strong><small>Management and Command systems</small></span></a>` : ""}<a class="v4-menu-link" href="${MAIN_URL}" target="_blank" rel="noopener"><span>↗</span><span class="v4-menu-copy"><strong>Main Cognitus</strong><small>Open the main product</small></span></a><a class="v4-menu-link" href="${CAREERS_URL}" target="_blank" rel="noopener"><span>TG</span><span class="v4-menu-copy"><strong>Talent Gateway</strong><small>Careers, applications, and hiring</small></span></a><div class="v4-menu-separator"></div><button class="v4-menu-button" type="button" data-v4-signout><span>SO</span><span class="v4-menu-copy"><strong>Sign out</strong><small>End this Staff / Command session</small></span></button></div>`;
 }
 
 async function markAllRead() {
@@ -385,12 +574,18 @@ async function markAllRead() {
   try {
     for (let i = 0; i < unread.length; i += 400) {
       const batch = writeBatch();
-      unread.slice(i, i + 400).forEach((item) => batch.update(v4.Fire.doc(v4.db, "staffInbox", item.id), { readAt: v4.Fire.serverTimestamp(), updatedAt: v4.Fire.serverTimestamp() }));
+      unread.slice(i, i + 400).forEach((item) => batch.update(v4.Fire.doc(v4.db, "staffInbox", item.id), {
+        readAt: v4.Fire.serverTimestamp(),
+        updatedAt: v4.Fire.serverTimestamp()
+      }));
       await batch.commit();
     }
-    v4.cache.delete(cacheKey());
+    v4.cache.clear();
     await syncTopbar(true);
-  } catch (error) { console.warn("Could not mark notifications read", error); }
+    if (["/", "/dashboard"].includes(route())) await renderDashboard(true);
+  } catch (error) {
+    console.warn("Could not mark notifications read", error);
+  }
 }
 
 async function syncTopbar(forceNotifications = false) {
@@ -400,23 +595,35 @@ async function syncTopbar(forceNotifications = false) {
     const data = await loadMyDay(forceNotifications);
     if (!document.querySelector("#v4-create-trigger")) {
       const create = document.createElement("button");
-      create.id = "v4-create-trigger"; create.type = "button"; create.className = "v4-top-action dark";
+      create.id = "v4-create-trigger";
+      create.type = "button";
+      create.className = "v4-top-action dark";
       create.innerHTML = `<span>＋</span><span class="v4-action-label">Create</span>`;
       topbarActions.insertBefore(create, topbarActions.firstChild);
       create.addEventListener("click", () => {
         const popover = ensurePopover("v4-create-popover");
-        popover.innerHTML = createMenuHtml(); popover.hidden = !popover.hidden; positionPopover(popover, create); closePopovers(popover.hidden ? "" : popover.id);
+        popover.innerHTML = createMenuHtml();
+        popover.hidden = !popover.hidden;
+        positionPopover(popover, create);
+        closePopovers(popover.hidden ? "" : popover.id);
       });
     }
+
     let bell = document.querySelector("#v4-notification-trigger");
     if (!bell) {
-      bell = document.createElement("button"); bell.id = "v4-notification-trigger"; bell.type = "button"; bell.className = "v4-top-action";
+      bell = document.createElement("button");
+      bell.id = "v4-notification-trigger";
+      bell.type = "button";
+      bell.className = "v4-top-action";
       const inboxAnchor = topbarActions.querySelector('a[href="#/inbox"]');
       if (inboxAnchor) inboxAnchor.style.display = "none";
       topbarActions.insertBefore(bell, topbarActions.querySelector(".user-chip") || null);
       bell.addEventListener("click", async () => {
         const popover = ensurePopover("v4-notification-popover");
-        popover.innerHTML = `<div class="v4-empty-mini">Loading notifications…</div>`; popover.hidden = false; positionPopover(popover, bell); closePopovers(popover.id);
+        popover.innerHTML = `<div class="v4-empty-mini">Loading notifications…</div>`;
+        popover.hidden = false;
+        positionPopover(popover, bell);
+        closePopovers(popover.id);
         popover.innerHTML = await notificationMenuHtml();
         popover.querySelector("[data-v4-mark-read]")?.addEventListener("click", markAllRead);
       });
@@ -425,33 +632,79 @@ async function syncTopbar(forceNotifications = false) {
 
     const chip = topbarActions.querySelector(".user-chip");
     if (chip && !chip.classList.contains("v4-account-ready")) {
-      chip.classList.add("v4-account-ready"); chip.tabIndex = 0; chip.setAttribute("role", "button"); chip.setAttribute("aria-label", "Open account menu");
-      const open = () => { const popover = ensurePopover("v4-account-popover"); popover.innerHTML = accountMenuHtml(); popover.hidden = !popover.hidden; positionPopover(popover, chip); closePopovers(popover.hidden ? "" : popover.id); popover.querySelector("[data-v4-signout]")?.addEventListener("click", async () => { await v4.Auth.signOut(v4.auth); location.hash = "#/login"; }); };
-      chip.addEventListener("click", open); chip.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); open(); } });
+      chip.classList.add("v4-account-ready");
+      chip.tabIndex = 0;
+      chip.setAttribute("role", "button");
+      chip.setAttribute("aria-label", "Open account menu");
+      const open = () => {
+        const popover = ensurePopover("v4-account-popover");
+        popover.innerHTML = accountMenuHtml();
+        popover.hidden = !popover.hidden;
+        positionPopover(popover, chip);
+        closePopovers(popover.hidden ? "" : popover.id);
+        popover.querySelector("[data-v4-signout]")?.addEventListener("click", async () => {
+          await v4.Auth.signOut(v4.auth);
+          location.hash = "#/login";
+        });
+      };
+      chip.addEventListener("click", open);
+      chip.addEventListener("keydown", (event) => {
+        if (["Enter", " "].includes(event.key)) {
+          event.preventDefault();
+          open();
+        }
+      });
     }
-  } finally { v4.topbarSyncing = false; }
+  } finally {
+    v4.topbarSyncing = false;
+  }
 }
 
 function ensureMobileDock() {
   let dock = document.querySelector("#portal-mobile-dock-v4");
-  if (!activeStaff()) { dock?.remove(); return; }
-  if (!dock) {
-    dock = document.createElement("nav"); dock.id = "portal-mobile-dock-v4"; dock.className = "portal-mobile-dock-v4"; dock.setAttribute("aria-label", "Quick navigation"); document.body.appendChild(dock);
+  if (!activeStaff()) {
+    dock?.remove();
+    return;
   }
-  const items = [["#/dashboard","Home","HM"],["#/department-command","Department","DP"],["#/tasks","Tasks","TK"],["#/inbox","Inbox","IN"]];
-  dock.innerHTML = items.map(([href,label,icon]) => `<a href="${href}" class="${route() === href.replace(/^#/,"") ? "active" : ""}"><span>${icon}</span><small>${label}</small></a>`).join("");
+  if (!dock) {
+    dock = document.createElement("nav");
+    dock.id = "portal-mobile-dock-v4";
+    dock.className = "portal-mobile-dock-v4";
+    dock.setAttribute("aria-label", "Quick navigation");
+    document.body.appendChild(dock);
+  }
+  const items = [
+    ["#/dashboard", "Home", "HM"],
+    [dashboardHref("work"), "Work", "WK"],
+    ["#/department-command", "Department", "DP"],
+    [dashboardHref("resources"), "Resources", "RS"]
+  ];
+  dock.innerHTML = items.map(([href,label,icon]) => `<a href="${href}" class="${navIsActive(href) ? "active" : ""}"><span>${icon}</span><small>${label}</small></a>`).join("");
 }
 
 function enhanceLogin() {
   if (route() !== "/login" && v4.authUser) return;
   const password = root?.querySelector('input[name="password"]');
   if (password && !password.closest(".v4-password-wrap")) {
-    const wrap = document.createElement("div"); wrap.className = "v4-password-wrap"; password.parentNode.insertBefore(wrap, password); wrap.appendChild(password);
-    const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "v4-password-toggle"; toggle.textContent = "Show"; wrap.appendChild(toggle);
-    toggle.addEventListener("click", () => { const hidden = password.type === "password"; password.type = hidden ? "text" : "password"; toggle.textContent = hidden ? "Hide" : "Show"; });
+    const wrap = document.createElement("div");
+    wrap.className = "v4-password-wrap";
+    password.parentNode.insertBefore(wrap, password);
+    wrap.appendChild(password);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "v4-password-toggle";
+    toggle.textContent = "Show";
+    wrap.appendChild(toggle);
+    toggle.addEventListener("click", () => {
+      const hidden = password.type === "password";
+      password.type = hidden ? "text" : "password";
+      toggle.textContent = hidden ? "Hide" : "Show";
+    });
   }
   const panel = root?.querySelector(".login-panel");
-  if (panel && !panel.querySelector(".v4-login-links")) panel.insertAdjacentHTML("beforeend", `<div class="v4-login-links"><a href="${MAIN_URL}" target="_blank" rel="noopener">Main Cognitus ↗</a><a href="${CAREERS_URL}" target="_blank" rel="noopener">Talent Gateway ↗</a></div>`);
+  if (panel && !panel.querySelector(".v4-login-links")) {
+    panel.insertAdjacentHTML("beforeend", `<div class="v4-login-links"><a href="${MAIN_URL}" target="_blank" rel="noopener">Main Cognitus ↗</a><a href="${CAREERS_URL}" target="_blank" rel="noopener">Talent Gateway ↗</a></div>`);
+  }
 }
 
 function maybeOpenRequestedAction() {
@@ -463,16 +716,27 @@ function maybeOpenRequestedAction() {
   const timer = window.setInterval(() => {
     const button = root?.querySelector(selector);
     if (button) {
-      clearInterval(timer); button.click(); history.replaceState(null, "", `#${route()}`); window.setTimeout(() => root.querySelector("form input, form textarea, form select")?.focus(), 70);
-    } else if (Date.now() - started > 2500) clearInterval(timer);
+      clearInterval(timer);
+      button.click();
+      history.replaceState(null, "", `#${route()}`);
+      window.setTimeout(() => root.querySelector("form input, form textarea, form select")?.focus(), 70);
+    } else if (Date.now() - started > 2500) {
+      clearInterval(timer);
+    }
   }, 90);
 }
 
 function scheduleEnhance(delay = 80) {
   window.setTimeout(async () => {
     if (!v4.ready) return;
-    if (!activeStaff()) { enhanceLogin(); return; }
-    syncSidebar(); ensureMobileDock(); await syncTopbar(); maybeOpenRequestedAction();
+    if (!activeStaff()) {
+      enhanceLogin();
+      return;
+    }
+    syncSidebar();
+    ensureMobileDock();
+    await syncTopbar();
+    maybeOpenRequestedAction();
     if (["/", "/dashboard"].includes(route())) await renderDashboard();
   }, delay);
 }
@@ -480,28 +744,58 @@ function scheduleEnhance(delay = 80) {
 async function init() {
   document.body.classList.add("command-v4-active");
   const started = Date.now();
-  while (!firebaseState().ready && Date.now() - started < 10000) await new Promise((resolve) => setTimeout(resolve, 50));
+  while (!firebaseState().ready && Date.now() - started < 10000) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   const services = firebaseState();
-  if (!services.ready) { enhanceLogin(); return; }
+  if (!services.ready) {
+    enhanceLogin();
+    return;
+  }
   ({ auth: v4.auth, db: v4.db, Auth: v4.Auth, Fire: v4.Fire } = services);
+
   v4.Auth.onAuthStateChanged(v4.auth, async (user) => {
-    try { await refreshIdentity(user); } catch (error) { console.warn("V4 identity refresh unavailable", error); }
-    v4.ready = true; scheduleEnhance(140);
+    try { await refreshIdentity(user); }
+    catch (error) { console.warn("V4 identity refresh unavailable", error); }
+    v4.ready = true;
+    scheduleEnhance(140);
   });
 
-  window.addEventListener("hashchange", () => { v4.renderToken += 1; closePopovers(); scheduleEnhance(100); });
+  window.addEventListener("hashchange", () => {
+    v4.renderToken += 1;
+    closePopovers();
+    scheduleEnhance(90);
+  });
   window.addEventListener("resize", () => closePopovers());
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closePopovers();
-    if (event.altKey && lower(event.key) === "n" && activeStaff()) { event.preventDefault(); document.querySelector("#v4-create-trigger")?.click(); }
+    if (event.altKey && lower(event.key) === "n" && activeStaff()) {
+      event.preventDefault();
+      document.querySelector("#v4-create-trigger")?.click();
+    }
   });
   document.addEventListener("click", (event) => {
     if (event.target.closest("[data-v4-close]")) closePopovers();
     if (!event.target.closest(".v4-popover, #v4-create-trigger, #v4-notification-trigger, .user-chip")) closePopovers();
   });
-  if (sidebar) new MutationObserver(() => { if (v4.ready && activeStaff() && !sidebar.querySelector("[data-v4-nav]")) scheduleEnhance(20); }).observe(sidebar, { childList: true });
-  if (topbarActions) new MutationObserver(() => { if (v4.ready && activeStaff() && !topbarActions.querySelector("#v4-create-trigger")) scheduleEnhance(20); }).observe(topbarActions, { childList: true });
-  if (root) new MutationObserver(() => { if (!v4.ready) return; if (!v4.authUser) enhanceLogin(); else if (["/", "/dashboard"].includes(route()) && !root.querySelector("[data-v4-dashboard]")) scheduleEnhance(40); }).observe(root, { childList: true });
+
+  if (sidebar) {
+    new MutationObserver(() => {
+      if (v4.ready && activeStaff() && !sidebar.querySelector("[data-v4-nav]")) scheduleEnhance(20);
+    }).observe(sidebar, { childList: true });
+  }
+  if (topbarActions) {
+    new MutationObserver(() => {
+      if (v4.ready && activeStaff() && !topbarActions.querySelector("#v4-create-trigger")) scheduleEnhance(20);
+    }).observe(topbarActions, { childList: true });
+  }
+  if (root) {
+    new MutationObserver(() => {
+      if (!v4.ready) return;
+      if (!v4.authUser) enhanceLogin();
+      else if (["/", "/dashboard"].includes(route()) && !root.querySelector("[data-v4-dashboard]")) scheduleEnhance(35);
+    }).observe(root, { childList: true });
+  }
 }
 
 init();
