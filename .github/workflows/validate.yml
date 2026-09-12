@@ -19,15 +19,31 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check src/app.js
+          node --check src/extensions-loader-v4.js
+          node --check src/command-v4.js
           node --check src/generation2.js
           node --check src/generation3.js
           node --check src/firebase.js
           node --check src/utils.js
           node --check src/config/departments.js
           node --check src/config/permissions.js
+      - name: Verify consolidated V4 runtime
+        run: |
+          grep -q 'src/app.js' index.html
+          grep -q 'src/extensions-loader-v4.js' index.html
+          grep -q 'src/command-v4.js' index.html
+          grep -q 'generation2.js' src/extensions-loader-v4.js
+          grep -q 'generation3.js' src/extensions-loader-v4.js
+          if grep -q 'src/portal-overhaul.js' index.html; then
+            echo "Legacy portal-overhaul runtime is still active."
+            exit 1
+          fi
+          if grep -q 'src/department-command-v2.js' index.html; then
+            echo "Legacy department-command-v2 runtime is still active."
+            exit 1
+          fi
       - name: Verify Generation 2 integration
         run: |
-          grep -q 'src/generation2.js' index.html
           grep -q 'COMMAND_GENERATION_2_BEGIN' firestore.command.g2.rules.fragment
           grep -q 'match /commandTasks/{taskId}' firestore.command.g2.rules.fragment
           grep -q 'match /commandRequests/{requestId}' firestore.command.g2.rules.fragment
@@ -37,7 +53,6 @@ jobs:
           grep -q 'match /commandTickets/{ticketId}' firestore.command.g2.rules.fragment
       - name: Verify Generation 3 integration
         run: |
-          grep -q 'src/generation3.js' index.html
           grep -q 'COMMAND_GENERATION_3_BEGIN' firestore.command.g3.rules.fragment
           grep -q 'match /commandCases/{caseId}' firestore.command.g3.rules.fragment
           grep -q 'match /commandEvidence/{evidenceId}' firestore.command.g3.rules.fragment
@@ -52,6 +67,10 @@ jobs:
           test ! -f firestore.indexes.json
           if grep -R "firestore:indexes" -n . --exclude-dir=.git --exclude='validate.yml'; then
             echo "Composite index deployment reference found."
+            exit 1
+          fi
+          if grep -R "orderBy(" -n src/command-v4.js src/extensions-loader-v4.js; then
+            echo "V4 must sort locally instead of requiring composite indexes."
             exit 1
           fi
       - name: Verify shared Firebase project
