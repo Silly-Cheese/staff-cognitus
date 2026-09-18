@@ -81,7 +81,8 @@ const EXTENSION_ROUTES = new Set([
   "/command/organizations", "/command/cases", "/command/evidence",
   "/command/accreditation", "/command/escalations", "/command/incidents",
   "/department-command", "/quality", "/public-relations", "/customer-service",
-  "/executive", "/executive/accounts", "/executive/approvals", "/executive/audit"
+  "/executive", "/executive/accounts", "/executive/approvals", "/executive/audit",
+  "/discipline", "/admin/discipline"
 ]);
 
 function setTitle(title) {

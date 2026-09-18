@@ -102,6 +102,7 @@ function buildNavigation() {
   if (owner() || can(PERMISSIONS.ACCOUNTS_READ_ALL)) executive.push(item("#/executive/accounts", "Accounts & Organizations", "UA", "Executive account and organization registry"));
   if (owner() || can(PERMISSIONS.SYSTEM_MANAGE)) executive.push(item("#/executive/approvals", "Executive Approvals", "EA", "Cross-company approval queue"));
   if (owner() || can(PERMISSIONS.AUDIT_READ)) executive.push(item("#/executive/audit", "Audit Center", "AU", "Search recent authenticated activity"));
+  if (state.userRecord?.role === "owner") executive.push(item("#/admin/discipline", "Discipline Review", "DR", "Issue write-ups and decide staff appeals"));
 
   return [
     {
@@ -131,6 +132,7 @@ function buildNavigation() {
         item("#/tickets", "Service Desk", "TS", "Support and operational tickets"),
         item("#/announcements", "Announcements", "AN", "Company and department updates"),
         item("#/documents", "Documents", "DC", "Policies, forms, guides, and resources"),
+        item("#/discipline", "Write-Ups", "WU", "Your disciplinary records and appeal status"),
         item("#/leave", "Leave", "LV", "Time-away requests"),
         item("#/payroll", "Payroll", "PY", "Your payroll statements"),
         item("#/dashboard?view=resources", "Resources Hub", "RS", "Combined employee resources")
