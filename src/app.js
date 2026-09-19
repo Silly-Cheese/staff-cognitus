@@ -48,7 +48,6 @@ const state = {
   authUser: null,
   userRecord: null,
   staffAccess: null,
-  terminationNotice: null,
   directorySelf: null,
   employmentSelf: null,
   directory: [],
@@ -233,27 +232,25 @@ async function refreshIdentity() {
   if (!state.authUser) {
     state.userRecord = null;
     state.staffAccess = null;
-    state.terminationNotice = null;
     state.directorySelf = null;
     state.employmentSelf = null;
     return;
   }
 
   const uid = state.authUser.uid;
-  const [userRecord, staffAccess, directorySelf, terminationNotice] = await Promise.all([
+  const [userRecord, staffAccess, directorySelf, employmentSelf] = await Promise.all([
     readDoc("users", uid),
     readDoc("staffAccess", uid).catch(() => null),
     readDoc("staffDirectory", uid).catch(() => null),
-    readDoc("staffTerminations", uid).catch(() => null)
+    readDoc("staffEmployment", uid).catch(() => null)
   ]);
 
   state.userRecord = userRecord;
   state.staffAccess = staffAccess;
   state.directorySelf = directorySelf;
-  state.terminationNotice = terminationNotice;
+  state.employmentSelf = employmentSelf;
 
   if (staffAccess && (isActiveStaff(staffAccess) || isMainOwner())) {
-    state.employmentSelf = await readDoc("staffEmployment", uid).catch(() => null);
     await Promise.all([loadDirectory(true), loadInbox(true)]);
   }
 }
@@ -368,10 +365,10 @@ function accessDeniedPage(title, description) {
 }
 
 function terminatedAccountPage() {
-  const notice = state.terminationNotice;
+  const notice = state.employmentSelf;
   setTitle("Employment Terminated");
   hidePortalChrome();
-  root.innerHTML = `<section class="termination-screen"><div class="termination-screen-backdrop"></div><section class="termination-account-modal" role="alertdialog" aria-modal="true" aria-labelledby="terminated-title"><span class="termination-account-mark">!</span><p class="eyebrow">Cognitus Staff / Command</p><h1 id="terminated-title">YOU HAVE BEEN TERMINATED</h1><p>Your employment and access to the Cognitus staff portal have been terminated.</p><dl><div><dt>Effective date</dt><dd>${safe(formatTimestamp(notice.terminatedAt))}</dd></div><div><dt>Reason</dt><dd>${safe(notice.reason || "No reason was provided.")}</dd></div><div><dt>Employee ID</dt><dd>${safe(notice.employeeId || state.directorySelf?.employeeId || "—")}</dd></div></dl><button class="button button-dark" id="terminated-signout" type="button">Acknowledge and Sign Out</button></section></section>`;
+  root.innerHTML = `<section class="termination-screen"><div class="termination-screen-backdrop"></div><section class="termination-account-modal" role="alertdialog" aria-modal="true" aria-labelledby="terminated-title"><span class="termination-account-mark">!</span><p class="eyebrow">Cognitus Staff / Command</p><h1 id="terminated-title">YOU HAVE BEEN TERMINATED</h1><p>Your employment and access to the Cognitus staff portal have been terminated.</p><dl><div><dt>Effective date</dt><dd>${safe(formatTimestamp(notice.terminatedAt))}</dd></div><div><dt>Reason</dt><dd>${safe(notice.terminationReason || "No reason was provided.")}</dd></div><div><dt>Employee ID</dt><dd>${safe(notice.employeeId || state.directorySelf?.employeeId || "—")}</dd></div></dl><button class="button button-dark" id="terminated-signout" type="button">Acknowledge and Sign Out</button></section></section>`;
   root.querySelector("#terminated-signout")?.addEventListener("click", signOut);
 }
 
@@ -745,24 +742,15 @@ async function terminateStaff(event) {
     if (directory.rank === "owner" || access?.rank === "owner") return showNotice(message, "An Owner account cannot be terminated from this page.", "error");
     if (noticeOnly && (directory.status !== "former" || access)) return showNotice(message, "This account is not eligible for a former-staff notice.", "error");
     if (!noticeOnly && directory.status === "former") return showNotice(message, "This employee is already marked as former staff.", "error");
-    const existingNotice = await readDoc("staffTerminations", uid).catch(() => null);
-    if (existingNotice) return showNotice(message, "A termination notice already exists for this employee.", "error");
+    if (employment.terminationReason || employment.terminatedAt) return showNotice(message, "A termination notice already exists for this employee.", "error");
 
     const now = Fire.serverTimestamp();
     const batchWriter = writeBatch();
-    batchWriter.set(Fire.doc(db, "staffTerminations", uid), {
-      uid,
-      employeeId,
-      reason,
-      terminatedByUid: state.authUser.uid,
-      terminatedAt: now,
-      createdAt: now
-    });
     if (!noticeOnly) {
       batchWriter.update(Fire.doc(db, "staffDirectory", uid), { status: "former", updatedAt: now });
-      batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", updatedAt: now });
       batchWriter.delete(Fire.doc(db, "staffAccess", uid));
     }
+    batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", terminationReason: reason, terminatedByUid: state.authUser.uid, terminatedAt: now, updatedAt: now });
     await batchWriter.commit();
     await writeActivity("STAFF_TERMINATED", "staff", uid, `Terminated staff access for ${directory.displayName || employeeId}.`, { employeeId, reason });
     closeTerminationDialog();
@@ -925,7 +913,7 @@ async function renderRoute() {
   }
   if (!state.userRecord) return accessDeniedPage("Cognitus account unavailable", "No Cognitus account record is associated with this authenticated session.");
   if (!state.staffAccess) {
-    if (state.terminationNotice) return terminatedAccountPage();
+    if (state.employmentSelf?.employmentStatus === "former" && state.employmentSelf?.terminatedAt) return terminatedAccountPage();
     return isMainOwner() ? ownerBootstrapPage() : accessDeniedPage("Staff access required", "This Cognitus account has not been provisioned for the internal portal.");
   }
   if (!isActiveStaff(state.staffAccess)) return accessDeniedPage("Staff access unavailable", `Your current staff status is ${statusLabel(state.staffAccess.status)}.`);
