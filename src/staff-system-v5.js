@@ -111,6 +111,7 @@ function buildNavigation() {
       items: [
         item("#/dashboard", "Home", "HM", "My Day and what needs attention"),
         item("#/dashboard?view=work", "Work Center", "WK", "Combined action queue"),
+        item("#/operations-intelligence", "Operations Intelligence", "OI", "People, security, audit, discipline, calendars, reporting, and exports"),
         item("#/department-command", "My Department", "DP", "Department operating view"),
         item("#/inbox", "Inbox", "IN", "Staff notifications")
       ]
