@@ -259,6 +259,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .termination-warning strong { font-size: 12px; }
 .termination-warning span { font-size: 10px; line-height: 1.55; }
 .termination-actions { justify-content: flex-end; }
+.termination-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #111; }
+.termination-screen-backdrop { position: fixed; inset: 0; background: radial-gradient(circle at 50% 25%, #3a1111 0, #111 54%); }
+.termination-account-modal { position: relative; z-index: 1; width: min(560px, 100%); padding: 34px; border: 1px solid #6f2b2b; border-radius: 18px; background: #fff; box-shadow: 0 30px 100px rgba(0,0,0,.5); text-align: center; }
+.termination-account-mark { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 50%; color: #fff; background: var(--danger); font-size: 26px; font-weight: 900; }
+.termination-account-modal h1 { margin: 4px 0 12px; color: #9a1d1d; font-size: clamp(28px, 7vw, 44px); letter-spacing: -.045em; }
+.termination-account-modal > p:not(.eyebrow) { margin: 0 auto 22px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.termination-account-modal dl { display: grid; gap: 1px; margin: 0 0 22px; border: 1px solid var(--line); background: var(--line); text-align: left; }
+.termination-account-modal dl div { display: grid; grid-template-columns: 130px 1fr; gap: 14px; padding: 12px; background: #fff; }
+.termination-account-modal dt { color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+.termination-account-modal dd { margin: 0; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
 
 @media (max-width: 700px) {
   .staff-admin-row { flex-wrap: wrap; }
