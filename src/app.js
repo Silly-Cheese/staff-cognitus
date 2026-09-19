@@ -82,6 +82,7 @@ const EXTENSION_ROUTES = new Set([
   "/command/accreditation", "/command/escalations", "/command/incidents",
   "/department-command", "/quality", "/public-relations", "/customer-service",
   "/executive", "/executive/accounts", "/executive/approvals", "/executive/audit",
+  "/operations-intelligence",
   "/discipline", "/admin/discipline"
 ]);
 
