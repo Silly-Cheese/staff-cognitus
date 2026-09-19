@@ -514,6 +514,16 @@ function employeeListRow(employee) {
   return `<a class="list-row" href="#/staff/${encodeURIComponent(employee.uid || employee.id)}" style="text-decoration:none;color:inherit"><span class="avatar">${safe(initials(employee.displayName))}</span><span class="list-row-copy"><strong>${safe(employee.displayName || "Unnamed Employee")}</strong><span>${safe(employee.title || getRank(employee.rank).label)}</span><small>${safe(employee.employeeId || "—")} · ${safe(department.shortName)}</small></span><span class="badge ${safe(employee.status)}">${safe(statusLabel(employee.status))}</span></a>`;
 }
 
+function staffAdminEmployeeRow(employee) {
+  const department = getDepartment(employee.departmentId);
+  const uid = employee.uid || employee.id;
+  const canTerminate = isMainOwner()
+    && uid !== state.authUser?.uid
+    && employee.rank !== "owner"
+    && employee.status !== "former";
+  return `<article class="list-row staff-admin-row"><span class="avatar">${safe(initials(employee.displayName))}</span><span class="list-row-copy"><strong>${safe(employee.displayName || "Unnamed Employee")}</strong><span>${safe(employee.title || getRank(employee.rank).label)}</span><small>${safe(employee.employeeId || "—")} · ${safe(department.shortName)}</small></span><span class="badge ${safe(employee.status)}">${safe(statusLabel(employee.status))}</span><span class="staff-admin-actions"><a class="button button-small" href="#/staff/${encodeURIComponent(uid)}">View</a>${canTerminate ? `<button class="button button-small button-danger" type="button" data-terminate-staff="${safe(uid)}">Terminate</button>` : ""}</span></article>`;
+}
+
 function emptyState(icon, title, body, action = "") {
   return `<div class="empty-state"><span class="empty-state-icon">${safe(icon)}</span><h3>${safe(title)}</h3><p>${safe(body)}</p>${action ? `<div class="button-row" style="justify-content:center;margin-top:16px">${action}</div>` : ""}</div>`;
 }
@@ -651,7 +661,8 @@ async function staffAdminPage() {
       </section>
       <section class="panel"><header class="panel-header"><div><p class="eyebrow">Security model</p><h2>What provisioning creates</h2></div></header><div class="panel-body"><div class="bootstrap-list"><div class="bootstrap-item"><span class="bootstrap-check">1</span><div><strong>staffDirectory</strong><span>Internal-safe profile used by the employee directory.</span></div></div><div class="bootstrap-item"><span class="bootstrap-check">2</span><div><strong>staffAccess</strong><span>Department, rank, staff status, and explicit permissions.</span></div></div><div class="bootstrap-item"><span class="bootstrap-check">3</span><div><strong>staffEmployment</strong><span>Restricted HR/employment record, separate from directory data.</span></div></div></div></div></section>
     </section>
-    <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Current staff</p><h2>${state.directory.length} employee record${state.directory.length === 1 ? "" : "s"}</h2></div></header>${state.directory.length ? `<div class="list">${state.directory.map(employeeListRow).join("")}</div>` : emptyState("SD", "No staff provisioned", "Initialize or provision the first employee to begin building the directory.")}</section>
+    <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Current staff</p><h2>${state.directory.length} employee record${state.directory.length === 1 ? "" : "s"}</h2></div></header>${state.directory.length ? `<div class="list">${state.directory.map(staffAdminEmployeeRow).join("")}</div>` : emptyState("SD", "No staff provisioned", "Initialize or provision the first employee to begin building the directory.")}</section>
+    ${isMainOwner() ? `<dialog id="termination-dialog" class="termination-dialog"><form id="termination-form" class="form-stack"><input type="hidden" name="uid"><div><p class="eyebrow">Owner action</p><h2>Terminate staff access?</h2><p id="termination-summary">This immediately removes access to Cognitus Staff / Command and marks the employee as former staff.</p></div><div class="termination-warning"><strong>This action takes effect immediately.</strong><span>The directory and employment records will be retained as former-staff records. The staff-access record will be deleted.</span></div><label>Reason for termination<textarea name="reason" minlength="10" maxlength="500" rows="4" required placeholder="Enter an internal audit reason"></textarea></label><label>Type the employee ID to confirm<input name="confirmation" autocomplete="off" required></label><div id="termination-message" class="notice" hidden></div><div class="button-row termination-actions"><button class="button" type="button" data-cancel-termination>Cancel</button><button class="button button-danger" type="submit">Terminate Staff Access</button></div></form></dialog>` : ""}
   </div>`;
 
   const provisionForm = root.querySelector("#provision-form");
@@ -663,6 +674,73 @@ async function staffAdminPage() {
     if (departmentSelect) departmentSelect.value = "executive-office";
     if (presetSelect?.querySelector('option[value="co-owner"]')) presetSelect.value = "co-owner";
   });
+  root.querySelectorAll("[data-terminate-staff]").forEach((button) => button.addEventListener("click", () => openTerminationDialog(button.dataset.terminateStaff)));
+  root.querySelector("[data-cancel-termination]")?.addEventListener("click", closeTerminationDialog);
+  root.querySelector("#termination-form")?.addEventListener("submit", terminateStaff);
+}
+
+function openTerminationDialog(uid) {
+  if (!isMainOwner()) return;
+  const employee = state.directory.find((entry) => (entry.uid || entry.id) === uid);
+  if (!employee || uid === state.authUser?.uid || employee.rank === "owner" || employee.status === "former") {
+    return showToast("This staff record cannot be terminated.");
+  }
+  const dialog = root.querySelector("#termination-dialog");
+  const form = root.querySelector("#termination-form");
+  form.reset();
+  form.elements.uid.value = uid;
+  form.dataset.employeeId = employee.employeeId || "";
+  root.querySelector("#termination-summary").textContent = `Terminate ${employee.displayName || "this employee"}'s staff access and mark ${employee.employeeId || "their record"} as former staff.`;
+  dialog.showModal();
+  form.elements.reason.focus();
+}
+
+function closeTerminationDialog() {
+  root.querySelector("#termination-dialog")?.close();
+}
+
+async function terminateStaff(event) {
+  event.preventDefault();
+  if (!isMainOwner()) return;
+  const form = event.currentTarget;
+  const data = formObject(form);
+  const message = form.querySelector("#termination-message");
+  const button = form.querySelector('button[type="submit"]');
+  const uid = clean(data.uid);
+  const employeeId = clean(form.dataset.employeeId);
+  const reason = clean(data.reason).slice(0, 500);
+  if (!uid || uid === state.authUser?.uid) return showNotice(message, "You cannot terminate your own staff access.", "error");
+  if (!employeeId || clean(data.confirmation) !== employeeId) return showNotice(message, `Type ${employeeId || "the employee ID"} exactly to confirm.`, "error");
+  if (reason.length < 10) return showNotice(message, "Enter a termination reason of at least 10 characters.", "error");
+
+  try {
+    setBusy(button, true, "Terminating…", "Terminate Staff Access");
+    const [directory, access, employment] = await Promise.all([
+      readDoc("staffDirectory", uid),
+      readDoc("staffAccess", uid),
+      readDoc("staffEmployment", uid)
+    ]);
+    if (!directory || !access || !employment) return showNotice(message, "Termination stopped because one or more required staff records are missing.", "error");
+    if (directory.rank === "owner" || access.rank === "owner") return showNotice(message, "An Owner account cannot be terminated from this page.", "error");
+    if (directory.status === "former") return showNotice(message, "This employee is already marked as former staff.", "error");
+
+    const now = Fire.serverTimestamp();
+    const batchWriter = writeBatch();
+    batchWriter.update(Fire.doc(db, "staffDirectory", uid), { status: "former", updatedAt: now });
+    batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", updatedAt: now });
+    batchWriter.delete(Fire.doc(db, "staffAccess", uid));
+    await batchWriter.commit();
+    await writeActivity("STAFF_TERMINATED", "staff", uid, `Terminated staff access for ${directory.displayName || employeeId}.`, { employeeId, reason });
+    closeTerminationDialog();
+    state.directoryLoaded = false;
+    await staffAdminPage();
+    showToast("Staff access terminated.");
+  } catch (error) {
+    console.error(error);
+    showNotice(message, error?.code === "permission-denied" ? "Firestore denied the termination. Only the active Cognitus Owner can perform this action." : "The termination could not be completed. No partial change was applied.", "error");
+  } finally {
+    setBusy(button, false, "Terminating…", "Terminate Staff Access");
+  }
 }
 
 async function provisionStaff(event) {
