@@ -37,7 +37,7 @@ async function loadForRoute() {
     }
     if (matches(current, G3_ROUTES)) {
       loadingSurface("Command workspace");
-      g3Promise ||= import("./generation3.js?v=20260912-v4-lazy");
+      g3Promise ||= import("./generation3.js?v=20260919-runtime-repair");
       await g3Promise;
     }
   } catch (error) {
