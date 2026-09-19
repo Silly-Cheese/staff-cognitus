@@ -48,6 +48,7 @@ const state = {
   authUser: null,
   userRecord: null,
   staffAccess: null,
+  terminationNotice: null,
   directorySelf: null,
   employmentSelf: null,
   directory: [],
@@ -232,21 +233,24 @@ async function refreshIdentity() {
   if (!state.authUser) {
     state.userRecord = null;
     state.staffAccess = null;
+    state.terminationNotice = null;
     state.directorySelf = null;
     state.employmentSelf = null;
     return;
   }
 
   const uid = state.authUser.uid;
-  const [userRecord, staffAccess, directorySelf] = await Promise.all([
+  const [userRecord, staffAccess, directorySelf, terminationNotice] = await Promise.all([
     readDoc("users", uid),
     readDoc("staffAccess", uid).catch(() => null),
-    readDoc("staffDirectory", uid).catch(() => null)
+    readDoc("staffDirectory", uid).catch(() => null),
+    readDoc("staffTerminations", uid).catch(() => null)
   ]);
 
   state.userRecord = userRecord;
   state.staffAccess = staffAccess;
   state.directorySelf = directorySelf;
+  state.terminationNotice = terminationNotice;
 
   if (staffAccess && (isActiveStaff(staffAccess) || isMainOwner())) {
     state.employmentSelf = await readDoc("staffEmployment", uid).catch(() => null);
@@ -361,6 +365,14 @@ function accessDeniedPage(title, description) {
   topbarActions.innerHTML = `<button class="button button-small" id="denied-logout" type="button">Sign out</button>`;
   root.innerHTML = `<section class="access-shell"><div class="access-panel"><span class="access-mark">!</span><p class="eyebrow">Cognitus Command</p><h1>${safe(title)}</h1><p>${safe(description)}</p><div class="button-row" style="margin-top:24px"><a class="button button-dark" href="${MAIN_PORTAL_URL}" target="_blank" rel="noopener">Open Main Cognitus</a><button class="button" id="access-signout" type="button">Sign out</button></div></div></section>`;
   ["denied-logout", "access-signout"].forEach((id) => document.querySelector(`#${id}`)?.addEventListener("click", signOut));
+}
+
+function terminatedAccountPage() {
+  const notice = state.terminationNotice;
+  setTitle("Employment Terminated");
+  hidePortalChrome();
+  root.innerHTML = `<section class="termination-screen"><div class="termination-screen-backdrop"></div><section class="termination-account-modal" role="alertdialog" aria-modal="true" aria-labelledby="terminated-title"><span class="termination-account-mark">!</span><p class="eyebrow">Cognitus Staff / Command</p><h1 id="terminated-title">YOU HAVE BEEN TERMINATED</h1><p>Your employment and access to the Cognitus staff portal have been terminated.</p><dl><div><dt>Effective date</dt><dd>${safe(formatTimestamp(notice.terminatedAt))}</dd></div><div><dt>Reason</dt><dd>${safe(notice.reason || "No reason was provided.")}</dd></div><div><dt>Employee ID</dt><dd>${safe(notice.employeeId || state.directorySelf?.employeeId || "—")}</dd></div></dl><button class="button button-dark" id="terminated-signout" type="button">Acknowledge and Sign Out</button></section></section>`;
+  root.querySelector("#terminated-signout")?.addEventListener("click", signOut);
 }
 
 function ownerBootstrapPage() {
@@ -521,7 +533,8 @@ function staffAdminEmployeeRow(employee) {
     && uid !== state.authUser?.uid
     && employee.rank !== "owner"
     && employee.status !== "former";
-  return `<article class="list-row staff-admin-row"><span class="avatar">${safe(initials(employee.displayName))}</span><span class="list-row-copy"><strong>${safe(employee.displayName || "Unnamed Employee")}</strong><span>${safe(employee.title || getRank(employee.rank).label)}</span><small>${safe(employee.employeeId || "—")} · ${safe(department.shortName)}</small></span><span class="badge ${safe(employee.status)}">${safe(statusLabel(employee.status))}</span><span class="staff-admin-actions"><a class="button button-small" href="#/staff/${encodeURIComponent(uid)}">View</a>${canTerminate ? `<button class="button button-small button-danger" type="button" data-terminate-staff="${safe(uid)}">Terminate</button>` : ""}</span></article>`;
+  const canAddNotice = isMainOwner() && employee.status === "former" && employee.rank !== "owner";
+  return `<article class="list-row staff-admin-row"><span class="avatar">${safe(initials(employee.displayName))}</span><span class="list-row-copy"><strong>${safe(employee.displayName || "Unnamed Employee")}</strong><span>${safe(employee.title || getRank(employee.rank).label)}</span><small>${safe(employee.employeeId || "—")} · ${safe(department.shortName)}</small></span><span class="badge ${safe(employee.status)}">${safe(statusLabel(employee.status))}</span><span class="staff-admin-actions"><a class="button button-small" href="#/staff/${encodeURIComponent(uid)}">View</a>${canTerminate ? `<button class="button button-small button-danger" type="button" data-terminate-staff="${safe(uid)}">Terminate</button>` : canAddNotice ? `<button class="button button-small" type="button" data-add-termination-notice="${safe(uid)}">Add Termination Notice</button>` : ""}</span></article>`;
 }
 
 function emptyState(icon, title, body, action = "") {
@@ -646,6 +659,8 @@ async function staffAdminPage() {
   if (!canManageStaff()) return forbiddenPage("Staff Administration");
   await loadDirectory();
   renderChrome();
+  const currentEmployees = state.directory.filter((employee) => employee.status !== "former");
+  const formerEmployees = state.directory.filter((employee) => employee.status === "former");
   root.innerHTML = `<div class="page-inner">
     <header class="page-header"><div class="page-header-copy"><p class="eyebrow">Administration</p><h1>Staff administration.</h1><p>Provision an existing Cognitus account for internal staff access. This does not create a new Cognitus user and does not use a separate staff login system.</p></div></header>
     <section class="content-grid">
@@ -661,7 +676,8 @@ async function staffAdminPage() {
       </section>
       <section class="panel"><header class="panel-header"><div><p class="eyebrow">Security model</p><h2>What provisioning creates</h2></div></header><div class="panel-body"><div class="bootstrap-list"><div class="bootstrap-item"><span class="bootstrap-check">1</span><div><strong>staffDirectory</strong><span>Internal-safe profile used by the employee directory.</span></div></div><div class="bootstrap-item"><span class="bootstrap-check">2</span><div><strong>staffAccess</strong><span>Department, rank, staff status, and explicit permissions.</span></div></div><div class="bootstrap-item"><span class="bootstrap-check">3</span><div><strong>staffEmployment</strong><span>Restricted HR/employment record, separate from directory data.</span></div></div></div></div></section>
     </section>
-    <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Current staff</p><h2>${state.directory.length} employee record${state.directory.length === 1 ? "" : "s"}</h2></div></header>${state.directory.length ? `<div class="list">${state.directory.map(staffAdminEmployeeRow).join("")}</div>` : emptyState("SD", "No staff provisioned", "Initialize or provision the first employee to begin building the directory.")}</section>
+    <section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Current staff</p><h2>${currentEmployees.length} active employee record${currentEmployees.length === 1 ? "" : "s"}</h2></div></header>${currentEmployees.length ? `<div class="list">${currentEmployees.map(staffAdminEmployeeRow).join("")}</div>` : emptyState("SD", "No current staff", "Provision an employee to begin building the active staff directory.")}</section>
+    ${isMainOwner() && formerEmployees.length ? `<section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Retained records</p><h2>Former staff</h2></div><span class="badge former">${formerEmployees.length}</span></header><div class="list">${formerEmployees.map(staffAdminEmployeeRow).join("")}</div></section>` : ""}
     ${isMainOwner() ? `<dialog id="termination-dialog" class="termination-dialog"><form id="termination-form" class="form-stack"><input type="hidden" name="uid"><div><p class="eyebrow">Owner action</p><h2>Terminate staff access?</h2><p id="termination-summary">This immediately removes access to Cognitus Staff / Command and marks the employee as former staff.</p></div><div class="termination-warning"><strong>This action takes effect immediately.</strong><span>The directory and employment records will be retained as former-staff records. The staff-access record will be deleted.</span></div><label>Reason for termination<textarea name="reason" minlength="10" maxlength="500" rows="4" required placeholder="Enter an internal audit reason"></textarea></label><label>Type the employee ID to confirm<input name="confirmation" autocomplete="off" required></label><div id="termination-message" class="notice" hidden></div><div class="button-row termination-actions"><button class="button" type="button" data-cancel-termination>Cancel</button><button class="button button-danger" type="submit">Terminate Staff Access</button></div></form></dialog>` : ""}
   </div>`;
 
@@ -675,14 +691,15 @@ async function staffAdminPage() {
     if (presetSelect?.querySelector('option[value="co-owner"]')) presetSelect.value = "co-owner";
   });
   root.querySelectorAll("[data-terminate-staff]").forEach((button) => button.addEventListener("click", () => openTerminationDialog(button.dataset.terminateStaff)));
+  root.querySelectorAll("[data-add-termination-notice]").forEach((button) => button.addEventListener("click", () => openTerminationDialog(button.dataset.addTerminationNotice, true)));
   root.querySelector("[data-cancel-termination]")?.addEventListener("click", closeTerminationDialog);
   root.querySelector("#termination-form")?.addEventListener("submit", terminateStaff);
 }
 
-function openTerminationDialog(uid) {
+function openTerminationDialog(uid, noticeOnly = false) {
   if (!isMainOwner()) return;
   const employee = state.directory.find((entry) => (entry.uid || entry.id) === uid);
-  if (!employee || uid === state.authUser?.uid || employee.rank === "owner" || employee.status === "former") {
+  if (!employee || uid === state.authUser?.uid || employee.rank === "owner" || (noticeOnly ? employee.status !== "former" : employee.status === "former")) {
     return showToast("This staff record cannot be terminated.");
   }
   const dialog = root.querySelector("#termination-dialog");
@@ -690,7 +707,10 @@ function openTerminationDialog(uid) {
   form.reset();
   form.elements.uid.value = uid;
   form.dataset.employeeId = employee.employeeId || "";
-  root.querySelector("#termination-summary").textContent = `Terminate ${employee.displayName || "this employee"}'s staff access and mark ${employee.employeeId || "their record"} as former staff.`;
+  form.dataset.noticeOnly = noticeOnly ? "true" : "false";
+  root.querySelector("#termination-summary").textContent = noticeOnly
+    ? `Add the reason and effective date notice shown when ${employee.displayName || "this former employee"} attempts to sign in.`
+    : `Terminate ${employee.displayName || "this employee"}'s staff access and mark ${employee.employeeId || "their record"} as former staff.`;
   dialog.showModal();
   form.elements.reason.focus();
 }
@@ -708,6 +728,7 @@ async function terminateStaff(event) {
   const button = form.querySelector('button[type="submit"]');
   const uid = clean(data.uid);
   const employeeId = clean(form.dataset.employeeId);
+  const noticeOnly = form.dataset.noticeOnly === "true";
   const reason = clean(data.reason).slice(0, 500);
   if (!uid || uid === state.authUser?.uid) return showNotice(message, "You cannot terminate your own staff access.", "error");
   if (!employeeId || clean(data.confirmation) !== employeeId) return showNotice(message, `Type ${employeeId || "the employee ID"} exactly to confirm.`, "error");
@@ -720,21 +741,34 @@ async function terminateStaff(event) {
       readDoc("staffAccess", uid),
       readDoc("staffEmployment", uid)
     ]);
-    if (!directory || !access || !employment) return showNotice(message, "Termination stopped because one or more required staff records are missing.", "error");
-    if (directory.rank === "owner" || access.rank === "owner") return showNotice(message, "An Owner account cannot be terminated from this page.", "error");
-    if (directory.status === "former") return showNotice(message, "This employee is already marked as former staff.", "error");
+    if (!directory || !employment || (!noticeOnly && !access)) return showNotice(message, "Termination stopped because one or more required staff records are missing.", "error");
+    if (directory.rank === "owner" || access?.rank === "owner") return showNotice(message, "An Owner account cannot be terminated from this page.", "error");
+    if (noticeOnly && (directory.status !== "former" || access)) return showNotice(message, "This account is not eligible for a former-staff notice.", "error");
+    if (!noticeOnly && directory.status === "former") return showNotice(message, "This employee is already marked as former staff.", "error");
+    const existingNotice = await readDoc("staffTerminations", uid).catch(() => null);
+    if (existingNotice) return showNotice(message, "A termination notice already exists for this employee.", "error");
 
     const now = Fire.serverTimestamp();
     const batchWriter = writeBatch();
-    batchWriter.update(Fire.doc(db, "staffDirectory", uid), { status: "former", updatedAt: now });
-    batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", updatedAt: now });
-    batchWriter.delete(Fire.doc(db, "staffAccess", uid));
+    batchWriter.set(Fire.doc(db, "staffTerminations", uid), {
+      uid,
+      employeeId,
+      reason,
+      terminatedByUid: state.authUser.uid,
+      terminatedAt: now,
+      createdAt: now
+    });
+    if (!noticeOnly) {
+      batchWriter.update(Fire.doc(db, "staffDirectory", uid), { status: "former", updatedAt: now });
+      batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", updatedAt: now });
+      batchWriter.delete(Fire.doc(db, "staffAccess", uid));
+    }
     await batchWriter.commit();
     await writeActivity("STAFF_TERMINATED", "staff", uid, `Terminated staff access for ${directory.displayName || employeeId}.`, { employeeId, reason });
     closeTerminationDialog();
     state.directoryLoaded = false;
     await staffAdminPage();
-    showToast("Staff access terminated.");
+    showToast(noticeOnly ? "Termination notice added." : "Staff access terminated.");
   } catch (error) {
     console.error(error);
     showNotice(message, error?.code === "permission-denied" ? "Firestore denied the termination. Only the active Cognitus Owner can perform this action." : "The termination could not be completed. No partial change was applied.", "error");
@@ -890,7 +924,10 @@ async function renderRoute() {
     return;
   }
   if (!state.userRecord) return accessDeniedPage("Cognitus account unavailable", "No Cognitus account record is associated with this authenticated session.");
-  if (!state.staffAccess) return isMainOwner() ? ownerBootstrapPage() : accessDeniedPage("Staff access required", "This Cognitus account has not been provisioned for the internal portal.");
+  if (!state.staffAccess) {
+    if (state.terminationNotice) return terminatedAccountPage();
+    return isMainOwner() ? ownerBootstrapPage() : accessDeniedPage("Staff access required", "This Cognitus account has not been provisioned for the internal portal.");
+  }
   if (!isActiveStaff(state.staffAccess)) return accessDeniedPage("Staff access unavailable", `Your current staff status is ${statusLabel(state.staffAccess.status)}.`);
 
   renderChrome();
