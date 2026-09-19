@@ -238,7 +238,32 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .button-dark:hover { border-color: #000; background: #000; }
 .button-soft { border-color: #e5e5e5; background: #f3f3f3; }
 .button-danger { color: var(--danger); border-color: #e4b9b9; background: #fff7f7; }
+.button-danger:hover { border-color: var(--danger); background: #fff0f0; }
 .button-small { min-height: 32px; padding: 6px 10px; font-size: 11px; }
+
+.staff-admin-actions { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
+.termination-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  color: var(--ink);
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .24);
+}
+.termination-dialog::backdrop { background: rgba(16, 16, 16, .58); backdrop-filter: blur(3px); }
+.termination-dialog form { padding: 24px; }
+.termination-dialog h2 { margin: 3px 0 8px; font-size: 24px; letter-spacing: -.035em; }
+.termination-dialog p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.termination-warning { display: grid; gap: 5px; padding: 13px; border: 1px solid #efc5c5; border-radius: 10px; color: #781f1f; background: #fff5f5; }
+.termination-warning strong { font-size: 12px; }
+.termination-warning span { font-size: 10px; line-height: 1.55; }
+.termination-actions { justify-content: flex-end; }
+
+@media (max-width: 700px) {
+  .staff-admin-row { flex-wrap: wrap; }
+  .staff-admin-actions { width: 100%; margin-left: 48px; }
+}
 .icon-button {
   width: 40px;
   height: 40px;
