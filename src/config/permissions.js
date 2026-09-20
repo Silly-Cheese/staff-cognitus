@@ -116,12 +116,19 @@ export function bundle(name) {
   return [...(PERMISSION_BUNDLES[name] || PERMISSION_BUNDLES.staff)];
 }
 
+export function effectivePermissions(staffAccess) {
+  const direct = Array.isArray(staffAccess?.permissions) ? staffAccess.permissions : [];
+  const discordManaged = Array.isArray(staffAccess?.discordRoleSync?.managedPermissions)
+    ? staffAccess.discordRoleSync.managedPermissions
+    : [];
+  return [...new Set([...direct, ...discordManaged])];
+}
+
 export function hasPermission(staffAccess, permission) {
   return Boolean(
     staffAccess?.status &&
     ["active", "training", "on_leave"].includes(staffAccess.status) &&
-    Array.isArray(staffAccess.permissions) &&
-    staffAccess.permissions.includes(permission)
+    effectivePermissions(staffAccess).includes(permission)
   );
 }
 
