@@ -25,7 +25,9 @@ import {
 } from "./utils.js";
 
 const BUILD = "command-g1-2026-09-06";
-const MAIN_PORTAL_URL = "https://silly-cheese.github.io/cognitus-solutions/";
+const MAIN_PORTAL_URL = "https://cognitus-solutions.org/";
+const COGNITUS_AUTH_BASE = "https://auth.cognitus-solutions.org";
+const COGNITUS_PORTAL_KEY = "staff";
 
 const root = document.querySelector("#page-root");
 const sidebar = document.querySelector("#sidebar");
@@ -37,6 +39,37 @@ const commandOverlay = document.querySelector("#command-overlay");
 const commandInput = document.querySelector("#command-input");
 const commandResults = document.querySelector("#command-results");
 const toastRegion = document.querySelector("#toast-region");
+
+function discordOAuthUrl() {
+  return COGNITUS_AUTH_BASE + "/discord/start?portal=" + COGNITUS_PORTAL_KEY;
+}
+
+async function completeDiscordOAuthIfPresent() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("cognitus_oauth") !== "1") return false;
+  try {
+    const response = await fetch(
+      COGNITUS_AUTH_BASE + "/session/exchange?portal=" + COGNITUS_PORTAL_KEY,
+      { credentials: "include", headers: { Accept: "application/json" } }
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.customToken) {
+      throw new Error(payload.error || "Discord sign-in could not be completed.");
+    }
+    await Auth.setPersistence(auth, Auth.browserLocalPersistence);
+    await Auth.signInWithCustomToken(auth, payload.customToken);
+    sessionStorage.removeItem("cognitusDiscordOAuthError");
+    history.replaceState(null, "", location.pathname + "#/dashboard");
+    return true;
+  } catch (error) {
+    sessionStorage.setItem(
+      "cognitusDiscordOAuthError",
+      error?.message || "Discord sign-in could not be completed."
+    );
+    history.replaceState(null, "", location.pathname + "#/login");
+    return false;
+  }
+}
 
 let auth = null;
 let db = null;
@@ -318,7 +351,11 @@ function loginPage() {
           <h1>Sign in.</h1>
           <p>Use the same Discord ID and Cognitus password you use on the main Cognitus portal. There is no separate staff signup.</p>
           <div id="login-message" class="notice" hidden></div>
-          <form id="login-form" class="form-stack">
+          <div class="form-stack">
+            <a class="button button-dark" href="${safe(discordOAuthUrl())}">Continue with Discord</a>
+            <div class="login-security"><span>✓</span><span>Discord verifies your identity. Staff access is still enforced by Cognitus and Firestore.</span></div>
+          </div>
+          <form id="login-form" class="form-stack" style="margin-top:16px">
             <label>Discord ID<input name="discordId" inputmode="numeric" autocomplete="username" placeholder="Your Discord user ID" required></label>
             <label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Your Cognitus password" required></label>
             <label class="checkbox-line"><input name="remember" type="checkbox" checked> Remember this device</label>
@@ -328,6 +365,12 @@ function loginPage() {
         </div>
       </div>
     </section>`;
+
+  const oauthError = sessionStorage.getItem("cognitusDiscordOAuthError");
+  if (oauthError) {
+    sessionStorage.removeItem("cognitusDiscordOAuthError");
+    showNotice(root.querySelector("#login-message"), oauthError, "error");
+  }
 
   root.querySelector("#login-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -937,6 +980,7 @@ async function start() {
   try {
     const services = await initializeFirebase();
     ({ auth, db, Auth, Fire } = services);
+    await completeDiscordOAuthIfPresent();
     Auth.onAuthStateChanged(auth, async (user) => {
       state.authUser = user;
       try {
