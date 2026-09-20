@@ -342,26 +342,20 @@ function loginPage() {
     <section class="login-shell">
       <div class="login-visual">
         <div class="login-logo"><span class="brand-mark">C</span><div><strong>Cognitus Solutions</strong><small>Staff / Command</small></div></div>
-        <div class="login-message"><p class="eyebrow">Internal access</p><h2>The company runs from here.</h2><p>One secure workspace for Cognitus employees, department leadership, company administration, and Command operations. Staff access is separate from ordinary Cognitus product access.</p></div>
-        <div class="login-foot"><span>Shared Cognitus identity</span><span>•</span><span>Firestore-enforced staff access</span></div>
+        <div class="login-message"><p class="eyebrow">Internal access</p><h2>The company runs from here.</h2><p>Staff / Command uses the same verified Discord identity as Main Cognitus. Discord authentication does not grant employment access by itself.</p></div>
+        <div class="login-foot"><span>Discord-verified identity</span><span>•</span><span>Firestore-enforced staff access</span></div>
       </div>
       <div class="login-panel-wrap">
         <div class="login-panel">
           <p class="eyebrow">Cognitus Staff</p>
-          <h1>Sign in.</h1>
-          <p>Use the same Discord ID and Cognitus password you use on the main Cognitus portal. There is no separate staff signup.</p>
+          <h1>Sign in with Discord.</h1>
+          <p>Password sign-in is no longer offered. Cognitus verifies your Discord identity, then checks the existing Main Cognitus account and active <code>staffAccess</code> record before opening Command.</p>
           <div id="login-message" class="notice" hidden></div>
           <div class="form-stack">
             <a class="button button-dark" href="${safe(discordOAuthUrl())}">Continue with Discord</a>
-            <div class="login-security"><span>✓</span><span>Discord verifies your identity. Staff access is still enforced by Cognitus and Firestore.</span></div>
+            <div class="login-security"><span>✓</span><span>Your staff rank, permissions, termination status, and department access remain enforced after Discord authentication.</span></div>
           </div>
-          <form id="login-form" class="form-stack" style="margin-top:16px">
-            <label>Discord ID<input name="discordId" inputmode="numeric" autocomplete="username" placeholder="Your Discord user ID" required></label>
-            <label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Your Cognitus password" required></label>
-            <label class="checkbox-line"><input name="remember" type="checkbox" checked> Remember this device</label>
-            <button class="button button-dark" type="submit">Enter Cognitus Command</button>
-          </form>
-          <div class="login-security"><span>◈</span><span>Authentication alone does not grant staff access. Command requires an active <code>staffAccess</code> record enforced by Firestore.</span></div>
+          <div class="login-security"><span>◈</span><span>There is no Staff signup. Staff access must still be provisioned by Cognitus administration.</span></div>
         </div>
       </div>
     </section>`;
@@ -371,31 +365,6 @@ function loginPage() {
     sessionStorage.removeItem("cognitusDiscordOAuthError");
     showNotice(root.querySelector("#login-message"), oauthError, "error");
   }
-
-  root.querySelector("#login-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = formObject(form);
-    const discordId = normalizeDiscordId(data.discordId);
-    const message = root.querySelector("#login-message");
-    const button = form.querySelector("button[type=submit]");
-    if (!discordId) return showNotice(message, "Enter a valid Discord ID.", "error");
-    try {
-      setBusy(button, true, "Signing in…", "Enter Cognitus Command");
-      await Auth.setPersistence(auth, data.remember ? Auth.browserLocalPersistence : Auth.browserSessionPersistence);
-      await Auth.signInWithEmailAndPassword(auth, authEmail(discordId), data.password);
-      location.hash = "#/dashboard";
-    } catch (error) {
-      const messageText = ["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password"].includes(error?.code)
-        ? "The Discord ID or password is incorrect."
-        : error?.code === "auth/network-request-failed"
-          ? "Cognitus could not reach Firebase. Check your connection and try again."
-          : "Staff login could not be completed.";
-      showNotice(message, messageText, "error");
-    } finally {
-      setBusy(button, false, "Signing in…", "Enter Cognitus Command");
-    }
-  });
 }
 
 function accessDeniedPage(title, description) {
