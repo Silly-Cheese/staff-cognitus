@@ -574,7 +574,7 @@ async function leavePage() {
   setTitle("Leave");
   const items = await leaveData();
   const hr = owner() || can(PERMISSIONS.HR_RECORDS_MANAGE);
-  root.innerHTML = `<div class="page-inner" data-g2-page="leave">${pageHeader("People operations", "Leave.", "Submit time-away requests and, for authorized HR leadership, review company leave requests.", `<button class="button button-dark" id="new-leave" type="button">Request Leave</button>`)}<div id="leave-form-wrap" hidden></div><section class="panel">${items.length ? `<div class="g2-list">${items.map((item) => `<article class="g2-list-item"><div class="g2-list-copy"><strong>${safe(personName(item.requestorUid))} · ${safe(titleCase(item.type))}</strong><span>${safe(item.reason || "No reason provided.")}</span><span>${safe(formatDate(item.startsAt))} → ${safe(formatDate(item.endsAt))}</span></div><div class="g2-list-meta">Submitted<br>${safe(formatTimestamp(item.createdAt))}</div><div>${badge(item.status)}</div><div class="g2-list-actions">${hr && item.status === "pending" && item.requestorUid !== g2.authUser.uid ? `<button class="button button-small" data-leave-action="approved" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Approve</button><button class="button button-small" data-leave-action="declined" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Decline</button>` : ""}</div></article>`).join("")}</div>` : emptyState("LV", "No leave requests", "Your submitted requests will appear here.")}</section></div>`;
+  root.innerHTML = `<div class="page-inner" data-g2-page="leave">${pageHeader("People operations", "Leave.", "Submit time-away requests and, for authorized HR leadership, review company leave requests.", `<button class="button button-dark" id="new-leave" type="button">Request Leave</button>`)}<div id="leave-form-wrap" hidden></div><section class="panel">${items.length ? `<div class="g2-list">${items.map((item) => `<article class="g2-list-item"><div class="g2-list-copy"><strong>${safe(personName(item.requestorUid))} · ${safe(titleCase(item.type))}</strong><span>${safe(item.reason || "No reason provided.")}</span><span>${safe(formatDate(item.startsAt))} → ${safe(formatDate(item.endsAt))}</span></div><div class="g2-list-meta">Submitted<br>${safe(formatTimestamp(item.createdAt))}</div><div>${badge(item.status)}</div><div class="g2-list-actions">${hr && item.status === "pending" && (item.requestorUid !== g2.authUser.uid || owner()) ? `<button class="button button-small" data-leave-action="approved" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Approve</button><button class="button button-small" data-leave-action="declined" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Decline</button>` : ""}</div></article>`).join("")}</div>` : emptyState("LV", "No leave requests", "Your submitted requests will appear here.")}</section></div>`;
   root.querySelector("#new-leave")?.addEventListener("click", renderLeaveForm);
   root.querySelectorAll("[data-leave-action]").forEach((button) => button.addEventListener("click", async () => {
     try {
@@ -582,7 +582,8 @@ async function leavePage() {
       await updateRecord("commandLeave", button.dataset.leaveId, {
         status: action,
         reviewerUid: g2.authUser.uid,
-        reviewedAt: g2.Fire.serverTimestamp()
+        reviewedAt: g2.Fire.serverTimestamp(),
+        selfReviewedByOwner: Boolean(owner() && button.dataset.leavePerson === g2.authUser.uid)
       }, {
         action: "COMMAND_LEAVE_REVIEWED",
         summary: `Leave request ${action}.`
