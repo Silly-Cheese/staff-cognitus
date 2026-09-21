@@ -21,6 +21,7 @@ import {
 } from "./utils.js";
 
 const BUILD = "command-g2-2026-09-06";
+const COGNITUS_AUTH_BASE = "https://auth.cognitus-solutions.org";
 const root = document.querySelector("#page-root");
 const sidebar = document.querySelector("#sidebar");
 const commandOverlay = document.querySelector("#command-overlay");
@@ -113,6 +114,24 @@ function canManageTickets(id) {
 
 function setTitle(title) {
   document.title = `${title} · Cognitus Staff / Command`;
+}
+
+async function syncApprovedLeaveToDiscord(uid, leaveId) {
+  if (!g2.authUser) throw new Error("Cognitus Staff authentication is required.");
+  const idToken = await g2.authUser.getIdToken();
+  const response = await fetch(COGNITUS_AUTH_BASE + "/discord-admin/leave-role", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: "Bearer " + idToken
+    },
+    body: JSON.stringify({ uid, leaveId, active: true })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "The Discord leave role could not be assigned.");
+  return payload;
 }
 
 function toast(message) {
@@ -557,7 +576,52 @@ async function leavePage() {
   const hr = owner() || can(PERMISSIONS.HR_RECORDS_MANAGE);
   root.innerHTML = `<div class="page-inner" data-g2-page="leave">${pageHeader("People operations", "Leave.", "Submit time-away requests and, for authorized HR leadership, review company leave requests.", `<button class="button button-dark" id="new-leave" type="button">Request Leave</button>`)}<div id="leave-form-wrap" hidden></div><section class="panel">${items.length ? `<div class="g2-list">${items.map((item) => `<article class="g2-list-item"><div class="g2-list-copy"><strong>${safe(personName(item.requestorUid))} · ${safe(titleCase(item.type))}</strong><span>${safe(item.reason || "No reason provided.")}</span><span>${safe(formatDate(item.startsAt))} → ${safe(formatDate(item.endsAt))}</span></div><div class="g2-list-meta">Submitted<br>${safe(formatTimestamp(item.createdAt))}</div><div>${badge(item.status)}</div><div class="g2-list-actions">${hr && item.status === "pending" && item.requestorUid !== g2.authUser.uid ? `<button class="button button-small" data-leave-action="approved" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Approve</button><button class="button button-small" data-leave-action="declined" data-leave-id="${safe(item.id)}" data-leave-person="${safe(item.requestorUid)}">Decline</button>` : ""}</div></article>`).join("")}</div>` : emptyState("LV", "No leave requests", "Your submitted requests will appear here.")}</section></div>`;
   root.querySelector("#new-leave")?.addEventListener("click", renderLeaveForm);
-  root.querySelectorAll("[data-leave-action]").forEach((button) => button.addEventListener("click", async () => { try { await updateRecord("commandLeave", button.dataset.leaveId, { status: button.dataset.leaveAction, reviewerUid: g2.authUser.uid, reviewedAt: g2.Fire.serverTimestamp() }, { action: "COMMAND_LEAVE_REVIEWED", summary: `Leave request ${button.dataset.leaveAction}.` }); await notify(button.dataset.leavePerson, "leave", "Leave request updated", `Your leave request was ${button.dataset.leaveAction}.`, "#/leave"); toast(`Leave ${titleCase(button.dataset.leaveAction)}.`); await leavePage(); } catch (error) { console.error(error); toast("Leave update was not permitted."); } }));
+  root.querySelectorAll("[data-leave-action]").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      const action = button.dataset.leaveAction;
+      await updateRecord("commandLeave", button.dataset.leaveId, {
+        status: action,
+        reviewerUid: g2.authUser.uid,
+        reviewedAt: g2.Fire.serverTimestamp()
+      }, {
+        action: "COMMAND_LEAVE_REVIEWED",
+        summary: `Leave request ${action}.`
+      });
+
+      let discordRoleAssigned = false;
+      let discordSyncWarning = "";
+      if (action === "approved") {
+        try {
+          const sync = await syncApprovedLeaveToDiscord(button.dataset.leavePerson, button.dataset.leaveId);
+          discordRoleAssigned = Boolean(sync?.roleAssigned);
+          if (sync?.skipped && sync?.reason) discordSyncWarning = sync.reason;
+        } catch (syncError) {
+          console.warn("Approved leave Discord role sync failed", syncError);
+          discordSyncWarning = syncError?.message || "Discord role sync failed.";
+        }
+      }
+
+      await notify(
+        button.dataset.leavePerson,
+        "leave",
+        "Leave request updated",
+        `Your leave request was ${action}.${discordRoleAssigned ? " Your Leave of Absence Discord role was also assigned." : ""}`,
+        "#/leave"
+      );
+
+      if (action === "approved" && discordSyncWarning) {
+        toast(`Leave Approved. Discord: ${discordSyncWarning}`);
+      } else if (action === "approved" && discordRoleAssigned) {
+        toast("Leave Approved. Discord leave role assigned.");
+      } else {
+        toast(`Leave ${titleCase(action)}.`);
+      }
+      await leavePage();
+    } catch (error) {
+      console.error(error);
+      toast("Leave update was not permitted.");
+    }
+  }));
 }
 
 function renderLeaveForm() {
