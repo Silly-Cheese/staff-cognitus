@@ -771,6 +771,15 @@ async function discordIntegrationPage() {
           <label class="checkbox-line"><input id="discord-enabled" type="checkbox"> Enable Discord role synchronization</label>
           <label class="checkbox-line"><input id="discord-auto-sync" type="checkbox"> Auto-sync on Staff sign-in</label>
         </div>
+        <div class="form-row" style="margin-bottom:18px">
+          <label>Approved Leave of Absence role
+            <select id="discord-leave-role">
+              <option value="">Do not assign a leave role</option>
+            </select>
+            <span class="help-text">When HR approves a leave request, Cognitus will immediately add this Discord role to the employee.</span>
+          </label>
+          <span></span>
+        </div>
         <div id="discord-role-table"></div>
       </div>
     </section>
@@ -843,6 +852,10 @@ async function discordIntegrationPage() {
     const templates = Array.isArray(data.templates) ? data.templates : [];
     const savedByRole = new Map(mappings.map((mapping) => [String(mapping.roleId), mapping]));
     const roles = (data.roles || []).filter((role) => role.name !== "@everyone");
+    const leaveRoleSelect = root.querySelector("#discord-leave-role");
+    if (leaveRoleSelect) {
+      leaveRoleSelect.innerHTML = `<option value="">Do not assign a leave role</option>${roles.filter((role) => !role.managed && role.manageable).map((role) => `<option value="${safe(role.id)}" ${String(data?.config?.leaveRoleId || "") === String(role.id) ? "selected" : ""}>${safe(role.name)}</option>`).join("")}`;
+    }
 
     roleTable.innerHTML = `<div class="directory-table-wrap"><table class="directory-table">
       <thead><tr><th>Discord Role</th><th>Cognitus Template</th><th>Direction</th><th>Status</th></tr></thead>
@@ -892,6 +905,7 @@ async function discordIntegrationPage() {
         body: {
           enabled: root.querySelector("#discord-enabled").checked,
           autoSyncOnLogin: root.querySelector("#discord-auto-sync").checked,
+          leaveRoleId: root.querySelector("#discord-leave-role")?.value || null,
           mappings
         }
       });
