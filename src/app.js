@@ -646,7 +646,7 @@ async function staffProfilePage(uid) {
       <section class="panel"><header class="panel-header"><div><p class="eyebrow">Directory</p><h2>Employee information</h2></div></header><div class="details-grid"><div class="detail"><span>Department</span><strong>${safe(department.name)}</strong></div><div class="detail"><span>Rank</span><strong>${safe(rank.label)}</strong></div><div class="detail"><span>Position</span><strong>${safe(directory.title || rank.label)}</strong></div><div class="detail"><span>Discord</span><strong>${safe(directory.discordUsername || "—")}</strong></div><div class="detail"><span>Joined</span><strong>${safe(formatDate(directory.joinedAt))}</strong></div><div class="detail"><span>Status</span><strong>${safe(statusLabel(directory.status))}</strong></div></div></section>
       <section class="panel"><header class="panel-header"><div><p class="eyebrow">Department</p><h2>${safe(department.shortName)}</h2></div><a class="button button-small" href="#/departments/${safe(department.id)}">Open</a></header><div class="panel-body"><p style="margin:0;color:#666;font-size:11px;line-height:1.7">${safe(department.description)}</p><div class="permission-list" style="margin-top:16px">${department.focus.map((focus) => `<span class="permission-chip">${safe(focus)}</span>`).join("")}</div></div></section>
     </section>
-    ${access ? `<section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Security</p><h2>Command access</h2></div><span class="badge ${safe(access.status)}">${safe(statusLabel(access.status))}</span></header><div class="panel-body"><div class="permission-list">${(access.permissions || []).map((permission) => `<span class="permission-chip">${safe(permission)}</span>`).join("") || `<span class="help-text">No explicit permissions.</span>`}</div></div></section>` : ""}
+    ${access ? `<section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Security</p><h2>Effective Command access</h2></div><span class="badge ${safe(access.status)}">${safe(statusLabel(access.status))}</span></header><div class="panel-body"><div class="permission-list">${effectivePermissions(access).map((permission) => `<span class="permission-chip" title="${safe(permissionSources(access, permission).join(" + "))}">${safe(permissionLabel(permission))}</span>`).join("") || `<span class="help-text">No effective permissions.</span>`}</div></div></section>` : ""}
     ${employment ? `<section class="panel" style="margin-top:18px"><header class="panel-header"><div><p class="eyebrow">Restricted record</p><h2>Employment</h2></div></header><div class="details-grid"><div class="detail"><span>Employment status</span><strong>${safe(statusLabel(employment.employmentStatus))}</strong></div><div class="detail"><span>Hire date</span><strong>${safe(formatDate(employment.hireDate))}</strong></div><div class="detail"><span>Manager UID</span><strong>${safe(employment.managerUid || "Not assigned")}</strong></div><div class="detail"><span>Position history</span><strong>${Number(employment.positionHistory?.length || 0)} record(s)</strong></div></div></section>` : ""}
   </div>`;
 }
@@ -709,7 +709,7 @@ async function staffAdminPage() {
           <label>Discord ID<input name="discordId" inputmode="numeric" required></label>
           <div class="form-row"><label>Department<select name="departmentId" required>${DEPARTMENTS.filter((department) => department.id !== "executive-office" || isExecutiveOwner()).map((department) => `<option value="${safe(department.id)}">${safe(department.name)}</option>`).join("")}</select></label><label>Rank<select name="rank" required>${RANKS.filter((rank) => rank.id !== "owner" && (rank.id !== "co-owner" || isExecutiveOwner())).map((rank) => `<option value="${safe(rank.id)}">${safe(rank.label)}</option>`).join("")}</select></label></div>
           <label>Position Title<input name="title" maxlength="100" placeholder="e.g. Customer Service Specialist" required></label>
-          <label>Permission Preset<select name="preset" required><option value="staff">Standard Staff</option><option value="supervisor">Supervisor Foundation</option><option value="chief-public-relations">Chief Public Relations Officer</option><option value="chief-customer-service">Chief Customer Service Officer</option><option value="chief-financial-officer">Chief Financial Officer</option><option value="chief-human-resources">Chief Human Resources Officer</option><option value="chief-quality-assurance">Chief Quality Assurance Officer</option>${isExecutiveOwner() ? `<option value="co-owner">Co-Owner — Full Executive Access</option>` : ""}</select></label>
+          <label>Access Profile<select name="preset" required><option value="recommended">Recommended for rank + department</option><option value="staff">Standard Staff</option><option value="supervisor">Supervisor Foundation</option><option value="chief-public-relations">Chief Public Relations Officer</option><option value="chief-customer-service">Chief Customer Service Officer</option><option value="chief-financial-officer">Chief Financial Officer</option><option value="chief-human-resources">Chief Human Resources Officer</option><option value="chief-quality-assurance">Chief Quality Assurance Officer</option>${isExecutiveOwner() ? `<option value="co-owner">Co-Owner — Full Executive Access</option>` : ""}</select><span class="help-text">Recommended access uses least privilege: rank sets the baseline and department adds only the tools appropriate to that function.</span></label>
           <label>Status<select name="status"><option value="active">Active</option><option value="training">Training</option><option value="on_leave">On Leave</option></select></label>
           <button class="button button-dark" type="submit">Provision Staff Access</button>
         </form>
@@ -1040,7 +1040,7 @@ async function provisionStaff(event) {
 
     const employeeId = createEmployeeId();
     const now = Fire.serverTimestamp();
-    const permissions = bundle(data.rank === "co-owner" ? "co-owner" : data.preset);
+    const permissions = data.rank === "co-owner" ? bundle("co-owner") : data.preset === "recommended" ? recommendedPermissions(data.rank, data.departmentId) : bundle(data.preset);
     const rank = getRank(data.rank);
     const displayName = user.displayName || user.discordUsername || "Cognitus Employee";
     const batchWriter = writeBatch();
@@ -1086,7 +1086,7 @@ async function provisionStaff(event) {
     state.directoryLoaded = false;
     await loadDirectory(true);
     form.reset();
-    showNotice(message, `${displayName} was provisioned as ${employeeId}.`, "success");
+    showNotice(message, `${displayName} was provisioned as ${employeeId} with ${permissions.length} Cognitus permission${permissions.length === 1 ? "" : "s"}.`, "success");
     showToast("Staff access provisioned.");
   } catch (error) {
     console.error(error);
