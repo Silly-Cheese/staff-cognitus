@@ -1,6 +1,6 @@
 import { firebaseState, readDoc, readCollection, readQuery, newFirestoreDoc } from "./firebase.js";
 import { DEPARTMENTS, getDepartment, getRank } from "./config/departments.js";
-import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js";
+import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js?v=access-model-2";
 import {
   clean,
   lower,
@@ -75,7 +75,7 @@ const COMMAND_PAGES = [
 function owner() {
   return Boolean(
     (g2.userRecord?.status === "active" && g2.userRecord?.role === "owner")
-    || (g2.userRecord?.status === "active" && isActiveStaff(g2.staffAccess) && g2.staffAccess?.rank === "co-owner")
+    || (g2.userRecord?.status === "active" && isActiveStaff(g2.staffAccess) && ["owner", "co-owner"].includes(g2.staffAccess?.rank))
   );
 }
 
