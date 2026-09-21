@@ -31,7 +31,7 @@ async function loadForRoute() {
   try {
     if (matches(current, G2_ROUTES)) {
       loadingSurface("staff workspace");
-      g2Promise ||= import("./generation2.js?v=20260920-v6-owner-leave-review");
+      g2Promise ||= import("./generation2.js?v=20260920-v7-trusted-leave-review");
       await g2Promise;
       return;
     }
