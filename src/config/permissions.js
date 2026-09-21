@@ -40,7 +40,8 @@ export const PERMISSIONS = Object.freeze({
   ESCALATIONS_MANAGE: "escalations.manage",
   INCIDENTS_MANAGE: "incidents.manage",
   AUDIT_READ: "audit.read",
-  SYSTEM_MANAGE: "system.manage"
+  SYSTEM_MANAGE: "system.manage",
+  DISCORD_MEMBERS_KICK: "discord.members.kick"
 });
 
 export const PERMISSION_VALUES = Object.freeze(Object.values(PERMISSIONS));
@@ -154,7 +155,8 @@ export const PERMISSION_LABELS = Object.freeze({
   "escalations.manage": "Manage escalations",
   "incidents.manage": "Manage incidents",
   "audit.read": "Audit Center",
-  "system.manage": "System administration"
+  "system.manage": "System administration",
+  "discord.members.kick": "Kick Discord members"
 });
 
 export const PROTECTED_PERMISSIONS = Object.freeze([
@@ -163,7 +165,8 @@ export const PROTECTED_PERMISSIONS = Object.freeze([
   PERMISSIONS.STAFF_PROVISION,
   PERMISSIONS.STAFF_MANAGE,
   PERMISSIONS.PAYROLL_APPROVE,
-  PERMISSIONS.INTERNAL_AFFAIRS_MANAGE
+  PERMISSIONS.INTERNAL_AFFAIRS_MANAGE,
+  PERMISSIONS.DISCORD_MEMBERS_KICK
 ]);
 
 const RANK_BASE = Object.freeze({
