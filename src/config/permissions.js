@@ -112,8 +112,120 @@ export const PERMISSION_BUNDLES = Object.freeze({
   owner: PERMISSION_VALUES
 });
 
+export const PERMISSION_LABELS = Object.freeze({
+  "portal.access": "Staff / Command access",
+  "directory.read": "Staff directory",
+  "profile.read": "Staff profiles",
+  "accounts.read.all": "All Cognitus accounts",
+  "department.read": "Department workspaces",
+  "department.manage": "Department management",
+  "staff.provision": "Provision staff",
+  "staff.manage": "Manage staff",
+  "staff.private.read": "Private staff records",
+  "permissions.manage": "Manage permissions",
+  "tickets.read": "Read service tickets",
+  "tickets.manage": "Manage service tickets",
+  "tickets.all.read": "Read all service tickets",
+  "cs.manage": "Customer Service management",
+  "pr.manage": "Public Relations management",
+  "pr.approve": "Approve Public Relations work",
+  "finance.read": "Finance records",
+  "finance.manage": "Manage finance",
+  "payroll.read": "Payroll records",
+  "payroll.manage": "Manage payroll",
+  "payroll.approve": "Approve payroll",
+  "hr.records.read": "HR records",
+  "hr.records.manage": "Manage HR records",
+  "internalAffairs.read": "Internal Affairs records",
+  "internalAffairs.manage": "Manage Internal Affairs",
+  "qa.read": "Quality Assurance records",
+  "qa.manage": "Manage Quality Assurance",
+  "qa.audit": "Conduct QA audits",
+  "reports.review": "Review reports",
+  "claims.review": "Review claims",
+  "appeals.review": "Review appeals",
+  "verification.review": "Review verification",
+  "organizations.review": "Review organizations",
+  "cases.read": "Read case files",
+  "cases.manage": "Manage case files",
+  "evidence.read": "Read evidence",
+  "evidence.manage": "Manage evidence",
+  "accreditation.manage": "Manage accreditation",
+  "escalations.manage": "Manage escalations",
+  "incidents.manage": "Manage incidents",
+  "audit.read": "Audit Center",
+  "system.manage": "System administration"
+});
+
+export const PROTECTED_PERMISSIONS = Object.freeze([
+  PERMISSIONS.PERMISSIONS_MANAGE,
+  PERMISSIONS.SYSTEM_MANAGE,
+  PERMISSIONS.STAFF_PROVISION,
+  PERMISSIONS.STAFF_MANAGE,
+  PERMISSIONS.PAYROLL_APPROVE,
+  PERMISSIONS.INTERNAL_AFFAIRS_MANAGE
+]);
+
+const RANK_BASE = Object.freeze({
+  trainee: CORE,
+  staff: CORE,
+  "senior-staff": [...CORE, PERMISSIONS.TICKETS_READ],
+  supervisor: [...CORE, PERMISSIONS.TICKETS_READ, PERMISSIONS.DEPARTMENT_MANAGE],
+  manager: [...CORE, PERMISSIONS.TICKETS_READ, PERMISSIONS.DEPARTMENT_MANAGE],
+  director: [...CORE, PERMISSIONS.TICKETS_READ, PERMISSIONS.DEPARTMENT_MANAGE],
+  "chief-officer": [...CORE, PERMISSIONS.ACCOUNTS_READ_ALL, PERMISSIONS.DEPARTMENT_MANAGE],
+  "co-owner": PERMISSION_VALUES,
+  owner: PERMISSION_VALUES,
+  restricted: [PERMISSIONS.PORTAL_ACCESS, PERMISSIONS.PROFILE_READ]
+});
+
 export function bundle(name) {
   return [...(PERMISSION_BUNDLES[name] || PERMISSION_BUNDLES.staff)];
+}
+
+export function recommendedPermissions(rank = "staff", departmentId = "") {
+  if (rank === "owner" || rank === "co-owner") return [...PERMISSION_VALUES];
+  const base = [...(RANK_BASE[rank] || RANK_BASE.staff)];
+  const level = ({ trainee:20, staff:30, "senior-staff":40, supervisor:50, manager:60, director:75, "chief-officer":90 }[rank] || 30);
+  const add = (...permissions) => permissions.forEach((permission) => {
+    if (permission && !base.includes(permission)) base.push(permission);
+  });
+
+  if (departmentId === "customer-service") {
+    add(PERMISSIONS.TICKETS_READ);
+    if (level >= 50) add(PERMISSIONS.TICKETS_MANAGE, PERMISSIONS.CS_MANAGE);
+    if (level >= 75) add(PERMISSIONS.TICKETS_ALL_READ);
+  }
+  if (departmentId === "public-relations") {
+    if (level >= 40) add(PERMISSIONS.PR_MANAGE);
+    if (level >= 75) add(PERMISSIONS.PR_APPROVE);
+  }
+  if (departmentId === "finance") {
+    if (level >= 40) add(PERMISSIONS.FINANCE_READ, PERMISSIONS.PAYROLL_READ);
+    if (level >= 60) add(PERMISSIONS.FINANCE_MANAGE, PERMISSIONS.PAYROLL_MANAGE);
+    if (level >= 90) add(PERMISSIONS.PAYROLL_APPROVE);
+  }
+  if (departmentId === "human-resources") {
+    if (level >= 40) add(PERMISSIONS.HR_RECORDS_READ, PERMISSIONS.STAFF_PRIVATE_READ);
+    if (level >= 60) add(PERMISSIONS.HR_RECORDS_MANAGE, PERMISSIONS.TICKETS_MANAGE);
+    if (level >= 75) add(PERMISSIONS.INTERNAL_AFFAIRS_READ);
+    if (level >= 90) add(PERMISSIONS.STAFF_MANAGE, PERMISSIONS.INTERNAL_AFFAIRS_MANAGE);
+  }
+  if (departmentId === "quality-assurance") {
+    if (level >= 40) add(PERMISSIONS.QA_READ);
+    if (level >= 50) add(PERMISSIONS.QA_AUDIT);
+    if (level >= 60) add(PERMISSIONS.QA_MANAGE);
+    if (level >= 75) add(PERMISSIONS.AUDIT_READ);
+  }
+  if (departmentId === "executive-office" && level >= 75) {
+    add(PERMISSIONS.ACCOUNTS_READ_ALL, PERMISSIONS.AUDIT_READ);
+    if (level >= 90) add(PERMISSIONS.SYSTEM_MANAGE);
+  }
+  return [...new Set(base)];
+}
+
+export function permissionLabel(permission) {
+  return PERMISSION_LABELS[permission] || permission;
 }
 
 export function effectivePermissions(staffAccess) {
@@ -121,7 +233,16 @@ export function effectivePermissions(staffAccess) {
   const discordManaged = Array.isArray(staffAccess?.discordRoleSync?.managedPermissions)
     ? staffAccess.discordRoleSync.managedPermissions
     : [];
-  return [...new Set([...direct, ...discordManaged])];
+  const denied = new Set(Array.isArray(staffAccess?.deniedPermissions) ? staffAccess.deniedPermissions : []);
+  return [...new Set([...direct, ...discordManaged])].filter((permission) => !denied.has(permission));
+}
+
+export function permissionSources(staffAccess, permission) {
+  const sources = [];
+  if (Array.isArray(staffAccess?.permissions) && staffAccess.permissions.includes(permission)) sources.push("Cognitus");
+  if (Array.isArray(staffAccess?.discordRoleSync?.managedPermissions) && staffAccess.discordRoleSync.managedPermissions.includes(permission)) sources.push("Discord role");
+  if (Array.isArray(staffAccess?.deniedPermissions) && staffAccess.deniedPermissions.includes(permission)) sources.push("Explicitly denied");
+  return sources;
 }
 
 export function hasPermission(staffAccess, permission) {
