@@ -116,10 +116,10 @@ function setTitle(title) {
   document.title = `${title} · Cognitus Staff / Command`;
 }
 
-async function syncApprovedLeaveToDiscord(uid, leaveId) {
+async function reviewLeaveThroughCognitus(leaveId, action) {
   if (!g2.authUser) throw new Error("Cognitus Staff authentication is required.");
   const idToken = await g2.authUser.getIdToken();
-  const response = await fetch(COGNITUS_AUTH_BASE + "/discord-admin/leave-role", {
+  const response = await fetch(COGNITUS_AUTH_BASE + "/staff-admin/leave-review", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -127,10 +127,10 @@ async function syncApprovedLeaveToDiscord(uid, leaveId) {
       Accept: "application/json",
       Authorization: "Bearer " + idToken
     },
-    body: JSON.stringify({ uid, leaveId, active: true })
+    body: JSON.stringify({ leaveId, action })
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "The Discord leave role could not be assigned.");
+  if (!response.ok) throw new Error(payload.error || "The leave request could not be reviewed.");
   return payload;
 }
 
@@ -579,28 +579,9 @@ async function leavePage() {
   root.querySelectorAll("[data-leave-action]").forEach((button) => button.addEventListener("click", async () => {
     try {
       const action = button.dataset.leaveAction;
-      await updateRecord("commandLeave", button.dataset.leaveId, {
-        status: action,
-        reviewerUid: g2.authUser.uid,
-        reviewedAt: g2.Fire.serverTimestamp(),
-        selfReviewedByOwner: Boolean(owner() && button.dataset.leavePerson === g2.authUser.uid)
-      }, {
-        action: "COMMAND_LEAVE_REVIEWED",
-        summary: `Leave request ${action}.`
-      });
-
-      let discordRoleAssigned = false;
-      let discordSyncWarning = "";
-      if (action === "approved") {
-        try {
-          const sync = await syncApprovedLeaveToDiscord(button.dataset.leavePerson, button.dataset.leaveId);
-          discordRoleAssigned = Boolean(sync?.roleAssigned);
-          if (sync?.skipped && sync?.reason) discordSyncWarning = sync.reason;
-        } catch (syncError) {
-          console.warn("Approved leave Discord role sync failed", syncError);
-          discordSyncWarning = syncError?.message || "Discord role sync failed.";
-        }
-      }
+      const result = await reviewLeaveThroughCognitus(button.dataset.leaveId, action);
+      const discord = result?.discord || {};
+      const discordRoleAssigned = Boolean(discord.roleAssigned);
 
       await notify(
         button.dataset.leavePerson,
@@ -610,8 +591,8 @@ async function leavePage() {
         "#/leave"
       );
 
-      if (action === "approved" && discordSyncWarning) {
-        toast(`Leave Approved. Discord: ${discordSyncWarning}`);
+      if (action === "approved" && discord?.skipped && discord?.reason) {
+        toast(`Leave Approved. Discord: ${discord.reason}`);
       } else if (action === "approved" && discordRoleAssigned) {
         toast("Leave Approved. Discord leave role assigned.");
       } else {
@@ -620,7 +601,7 @@ async function leavePage() {
       await leavePage();
     } catch (error) {
       console.error(error);
-      toast("Leave update was not permitted.");
+      toast(error?.message || "Leave update was not permitted.");
     }
   }));
 }
