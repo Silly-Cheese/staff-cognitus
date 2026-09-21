@@ -1,6 +1,6 @@
 import { initializeFirebase, firebaseState, readDoc, readCollection, readQuery, newFirestoreDoc, writeBatch } from "./firebase.js";
 import { DEPARTMENTS, RANKS, getDepartment, getRank } from "./config/departments.js";
-import { PERMISSIONS, PERMISSION_VALUES, bundle, hasPermission, hasAnyPermission, isActiveStaff } from "./config/permissions.js";
+import { PERMISSIONS, PERMISSION_VALUES, bundle, effectivePermissions, hasPermission, hasAnyPermission, isActiveStaff } from "./config/permissions.js";
 import {
   clean,
   lower,
@@ -42,6 +42,31 @@ const toastRegion = document.querySelector("#toast-region");
 
 function discordOAuthUrl() {
   return COGNITUS_AUTH_BASE + "/discord/start?portal=" + COGNITUS_PORTAL_KEY;
+}
+
+async function discordAdminApi(path, options = {}) {
+  if (!state.authUser) throw new Error("Sign in to Cognitus Staff first.");
+  const idToken = await state.authUser.getIdToken();
+  const response = await fetch(COGNITUS_AUTH_BASE + path, {
+    method: options.method || "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      Authorization: "Bearer " + idToken,
+      ...(options.body ? { "Content-Type": "application/json" } : {})
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Discord integration request failed.");
+  return payload;
+}
+
+async function syncDiscordStaff(uid, apply = true) {
+  return discordAdminApi("/discord-admin/sync-user", {
+    method: "POST",
+    body: { uid, apply }
+  });
 }
 
 async function completeDiscordOAuthIfPresent() {
@@ -103,7 +128,8 @@ const NAV = Object.freeze([
     { href: MAIN_PORTAL_URL, label: "Open Main Cognitus", icon: "↗", external: true }
   ]},
   { group: "Administration", items: [
-    { href: "#/admin/staff", label: "Staff Administration", icon: "SA", anyPermission: [PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE] }
+    { href: "#/admin/staff", label: "Staff Administration", icon: "SA", anyPermission: [PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE] },
+    { href: "#/admin/discord", label: "Discord Integration", icon: "DI", anyPermission: [PERMISSIONS.PERMISSIONS_MANAGE, PERMISSIONS.SYSTEM_MANAGE] }
   ]}
 ]);
 
@@ -148,6 +174,10 @@ function canManageStaff() {
   // HR employee-management controls arrive in Generation 2, so only explicit
   // provisioners (and the Cognitus Owner) should see this page today.
   return isExecutiveOwner() || can(PERMISSIONS.STAFF_PROVISION);
+}
+
+function canManageDiscordIntegration() {
+  return isMainOwner() || can(PERMISSIONS.PERMISSIONS_MANAGE) || can(PERMISSIONS.SYSTEM_MANAGE);
 }
 
 function currentDepartment() {
@@ -706,6 +736,197 @@ async function staffAdminPage() {
   root.querySelector("#termination-form")?.addEventListener("submit", terminateStaff);
 }
 
+async function discordIntegrationPage() {
+  setTitle("Discord Integration");
+  if (!requireStaff()) return;
+  if (!canManageDiscordIntegration()) return forbiddenPage("Discord Integration");
+  renderChrome();
+
+  root.innerHTML = `<div class="page-inner">
+    <header class="page-header">
+      <div class="page-header-copy">
+        <p class="eyebrow">Identity & authorization</p>
+        <h1>Discord Integration.</h1>
+        <p>Connect real Discord role IDs to Cognitus permission templates. Discord can supply safe operational permissions; Cognitus remains authoritative for protected permissions, employment state, and Staff access.</p>
+      </div>
+      <span class="badge" id="discord-integration-status">Connecting…</span>
+    </header>
+    <section class="stats-grid" id="discord-integration-stats">
+      <article class="stat-card"><span>Server</span><strong style="font-size:16px">Loading…</strong><small>Discord guild connection</small></article>
+      <article class="stat-card"><span>Mapped Roles</span><strong>—</strong><small>Saved role mappings</small></article>
+      <article class="stat-card"><span>Auto Sync</span><strong>—</strong><small>Runs during Staff sign-in</small></article>
+      <article class="stat-card"><span>Sync Mode</span><strong style="font-size:16px">Safe</strong><small>Protected permissions stay Cognitus-only</small></article>
+    </section>
+    <section class="panel" style="margin-top:18px">
+      <header class="panel-header">
+        <div><p class="eyebrow">Role mapping center</p><h2>Discord roles → Cognitus authority</h2></div>
+        <div class="button-row">
+          <button class="button" id="discord-refresh" type="button">Refresh</button>
+          <button class="button button-dark" id="discord-save" type="button">Save Mappings</button>
+        </div>
+      </header>
+      <div class="panel-body">
+        <div id="discord-integration-message" class="notice" hidden></div>
+        <div class="form-row" style="margin-bottom:18px">
+          <label class="checkbox-line"><input id="discord-enabled" type="checkbox"> Enable Discord role synchronization</label>
+          <label class="checkbox-line"><input id="discord-auto-sync" type="checkbox"> Auto-sync on Staff sign-in</label>
+        </div>
+        <div id="discord-role-table"></div>
+      </div>
+    </section>
+    <section class="content-grid" style="margin-top:18px">
+      <section class="panel">
+        <header class="panel-header"><div><p class="eyebrow">Safety</p><h2>Protected authority</h2></div></header>
+        <div class="panel-body">
+          <p style="margin-top:0;color:#666;line-height:1.7">Discord roles never grant protected Cognitus authority such as <code>permissions.manage</code>, <code>system.manage</code>, <code>staff.provision</code>, <code>staff.manage</code>, <code>payroll.approve</code>, or <code>internalAffairs.manage</code>. Those remain direct Cognitus permissions.</p>
+          <p style="color:#666;line-height:1.7">Staff access still requires an existing Cognitus <code>staffAccess</code> record. A Discord role cannot turn an ordinary Cognitus account into an employee.</p>
+        </div>
+      </section>
+      <section class="panel">
+        <header class="panel-header"><div><p class="eyebrow">Reconciliation</p><h2>Preview before changing roles</h2></div></header>
+        <div class="panel-body">
+          <div class="button-row">
+            <button class="button" id="discord-preview" type="button">Preview Everyone</button>
+            <button class="button button-dark" id="discord-apply" type="button">Apply Safe Changes</button>
+          </div>
+          <div id="discord-sync-results" style="margin-top:16px;color:#666;font-size:11px;line-height:1.7">No sync has been run in this session.</div>
+        </div>
+      </section>
+    </section>
+  </div>`;
+
+  let integration = null;
+  const roleTable = root.querySelector("#discord-role-table");
+  const message = root.querySelector("#discord-integration-message");
+  const statusBadge = root.querySelector("#discord-integration-status");
+  const stats = root.querySelector("#discord-integration-stats");
+
+  const renderSyncResults = (payload) => {
+    const target = root.querySelector("#discord-sync-results");
+    const rows = Array.isArray(payload?.results) ? payload.results : [];
+    if (!rows.length) {
+      target.innerHTML = `<strong>No staff records required changes.</strong><br>${safe(payload?.message || "Everything Cognitus could evaluate is already synchronized.")}`;
+      return;
+    }
+    target.innerHTML = `<div class="list">${rows.slice(0, 50).map((item) => `
+      <article class="list-row">
+        <span class="avatar">${safe(initials(item.displayName || item.discordUsername || "DI"))}</span>
+        <span class="list-row-copy">
+          <strong>${safe(item.displayName || item.discordUsername || item.uid || "Staff member")}</strong>
+          <span>${safe(item.summary || item.status || "Sync evaluated")}</span>
+          <small>${safe((item.addRoles || []).length)} role(s) to add · ${safe((item.removeRoles || []).length)} role(s) to remove · ${safe((item.managedPermissions || []).length)} Discord-managed permission(s)</small>
+        </span>
+        <span class="badge ${item.error ? "former" : item.changed ? "active" : ""}">${item.error ? "Review" : item.changed ? "Change" : "In Sync"}</span>
+      </article>`).join("")}</div>`;
+  };
+
+  const renderIntegration = (data) => {
+    integration = data;
+    const configured = Boolean(data?.configured);
+    statusBadge.className = `badge ${configured ? "active" : "former"}`;
+    statusBadge.textContent = configured ? "Connected" : "Setup required";
+    const mappings = Array.isArray(data?.config?.mappings) ? data.config.mappings : [];
+    stats.innerHTML = `
+      <article class="stat-card"><span>Server</span><strong style="font-size:16px;line-height:1.2">${safe(data?.guild?.name || "Not configured")}</strong><small>${configured ? "Discord guild connected" : "Add the Worker secrets below"}</small></article>
+      <article class="stat-card"><span>Mapped Roles</span><strong>${mappings.length}</strong><small>Saved role mappings</small></article>
+      <article class="stat-card"><span>Auto Sync</span><strong>${data?.config?.autoSyncOnLogin ? "On" : "Off"}</strong><small>Runs during Staff sign-in</small></article>
+      <article class="stat-card"><span>Sync Mode</span><strong style="font-size:16px">Safe</strong><small>Protected permissions stay Cognitus-only</small></article>`;
+
+    root.querySelector("#discord-enabled").checked = data?.config?.enabled !== false;
+    root.querySelector("#discord-auto-sync").checked = Boolean(data?.config?.autoSyncOnLogin);
+
+    if (!configured) {
+      roleTable.innerHTML = `<div class="notice notice-error">Discord bot connection required. Add <code>DISCORD_BOT_TOKEN</code> as a Cloudflare Secret and <code>COGNITUS_GUILD_ID</code> as a Worker variable, then refresh this page.</div>`;
+      return;
+    }
+
+    const templates = Array.isArray(data.templates) ? data.templates : [];
+    const savedByRole = new Map(mappings.map((mapping) => [String(mapping.roleId), mapping]));
+    const roles = (data.roles || []).filter((role) => role.name !== "@everyone");
+
+    roleTable.innerHTML = `<div class="directory-table-wrap"><table class="directory-table">
+      <thead><tr><th>Discord Role</th><th>Cognitus Template</th><th>Direction</th><th>Status</th></tr></thead>
+      <tbody>${roles.map((role) => {
+        const saved = savedByRole.get(String(role.id));
+        const templateKey = saved?.templateKey || role.suggestedTemplate || "ignore";
+        const direction = saved?.direction || role.suggestedDirection || "display";
+        const disabled = role.managed ? "disabled" : "";
+        return `<tr data-discord-role="${safe(role.id)}" data-role-name="${safe(role.name)}">
+          <td><strong>${safe(role.name)}</strong><br><small style="color:#777">${safe(role.id)}</small></td>
+          <td><select data-role-template ${disabled}>${templates.map((template) => `<option value="${safe(template.key)}" ${template.key === templateKey ? "selected" : ""}>${safe(template.label)}</option>`).join("")}</select></td>
+          <td><select data-role-direction ${disabled}>
+            <option value="display" ${direction === "display" ? "selected" : ""}>Display only</option>
+            <option value="discord_to_cognitus" ${direction === "discord_to_cognitus" ? "selected" : ""}>Discord → Cognitus</option>
+            <option value="cognitus_to_discord" ${direction === "cognitus_to_discord" ? "selected" : ""}>Cognitus → Discord</option>
+            <option value="bidirectional" ${direction === "bidirectional" ? "selected" : ""}>Bidirectional</option>
+          </select></td>
+          <td><span class="badge ${role.managed ? "former" : saved ? "active" : ""}">${role.managed ? "Bot managed" : saved ? "Saved" : role.suggestedTemplate && role.suggestedTemplate !== "ignore" ? "Suggested" : "Ignored"}</span></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+  };
+
+  const refresh = async () => {
+    try {
+      showNotice(message, "Loading Discord server and role mappings…", "success");
+      renderIntegration(await discordAdminApi("/discord-admin/status"));
+      message.hidden = true;
+    } catch (error) {
+      renderIntegration({ configured: false, roles: [], templates: [], config: {} });
+      showNotice(message, error?.message || "Discord integration could not be loaded.", "error");
+    }
+  };
+
+  root.querySelector("#discord-refresh")?.addEventListener("click", refresh);
+  root.querySelector("#discord-save")?.addEventListener("click", async () => {
+    try {
+      const mappings = [...root.querySelectorAll("[data-discord-role]")].map((row) => ({
+        roleId: row.dataset.discordRole,
+        roleName: row.dataset.roleName,
+        templateKey: row.querySelector("[data-role-template]")?.value || "ignore",
+        direction: row.querySelector("[data-role-direction]")?.value || "display",
+        enabled: !row.querySelector("[data-role-template]")?.disabled
+      })).filter((mapping) => mapping.enabled && mapping.templateKey !== "ignore");
+      const payload = await discordAdminApi("/discord-admin/config", {
+        method: "POST",
+        body: {
+          enabled: root.querySelector("#discord-enabled").checked,
+          autoSyncOnLogin: root.querySelector("#discord-auto-sync").checked,
+          mappings
+        }
+      });
+      showNotice(message, `Saved ${payload.config?.mappings?.length || 0} Discord role mappings.`, "success");
+      await refresh();
+    } catch (error) {
+      showNotice(message, error?.message || "Role mappings could not be saved.", "error");
+    }
+  });
+
+  const runSync = async (apply) => {
+    const target = root.querySelector("#discord-sync-results");
+    target.textContent = apply ? "Applying Discord/Cognitus changes…" : "Building a safe sync preview…";
+    try {
+      const payload = await discordAdminApi("/discord-admin/sync-all", {
+        method: "POST",
+        body: { apply }
+      });
+      renderSyncResults(payload);
+      if (apply) {
+        await refreshIdentity();
+        renderChrome();
+      }
+    } catch (error) {
+      target.innerHTML = `<span style="color:#a33">${safe(error?.message || "Discord sync failed.")}</span>`;
+    }
+  };
+
+  root.querySelector("#discord-preview")?.addEventListener("click", () => runSync(false));
+  root.querySelector("#discord-apply")?.addEventListener("click", () => runSync(true));
+
+  await refresh();
+}
+
+
 function openTerminationDialog(uid, noticeOnly = false) {
   if (!isMainOwner()) return;
   const employee = state.directory.find((entry) => (entry.uid || entry.id) === uid);
@@ -766,6 +987,9 @@ async function terminateStaff(event) {
     batchWriter.update(Fire.doc(db, "staffEmployment", uid), { employmentStatus: "former", terminationReason: reason, terminatedByUid: state.authUser.uid, terminatedAt: now, updatedAt: now });
     await batchWriter.commit();
     await writeActivity("STAFF_TERMINATED", "staff", uid, `Terminated staff access for ${directory.displayName || employeeId}.`, { employeeId, reason });
+    if (!noticeOnly) {
+      await syncDiscordStaff(uid, true).catch((syncError) => console.warn("Discord role cleanup failed", syncError));
+    }
     closeTerminationDialog();
     state.directoryLoaded = false;
     await staffAdminPage();
@@ -844,6 +1068,7 @@ async function provisionStaff(event) {
     });
     await batchWriter.commit();
     await writeActivity("STAFF_PROVISIONED", "staff", user.uid, `Provisioned ${displayName} for Cognitus Staff / Command.`, { employeeId, departmentId: data.departmentId, rank: data.rank });
+    await syncDiscordStaff(user.uid, true).catch((syncError) => console.warn("Discord role provisioning sync failed", syncError));
     state.directoryLoaded = false;
     await loadDirectory(true);
     form.reset();
@@ -898,7 +1123,8 @@ function commandIndex() {
     { type: "Page", title: "Dashboard", subtitle: "Your Cognitus Staff workspace", href: "#/dashboard" },
     { type: "Page", title: "Inbox", subtitle: "Command notifications and action items", href: "#/inbox" },
     ...(can(PERMISSIONS.DIRECTORY_READ) ? [{ type: "Page", title: "Staff Directory", subtitle: "Search Cognitus employees", href: "#/directory" }] : []),
-    ...(can(PERMISSIONS.DEPARTMENT_READ) ? [{ type: "Page", title: "Departments", subtitle: "Cognitus company structure", href: "#/departments" }] : [])
+    ...(can(PERMISSIONS.DEPARTMENT_READ) ? [{ type: "Page", title: "Departments", subtitle: "Cognitus company structure", href: "#/departments" }] : []),
+    ...(canManageDiscordIntegration() ? [{ type: "Page", title: "Discord Integration", subtitle: "Role mapping and permission synchronization", href: "#/admin/discord" }] : [])
   ];
   const departments = can(PERMISSIONS.DEPARTMENT_READ) ? DEPARTMENTS.map((department) => ({ type: "Department", title: department.name, subtitle: department.chiefTitle, href: `#/departments/${department.id}`, icon: department.code })) : [];
   const employees = can(PERMISSIONS.DIRECTORY_READ) ? state.directory.map((employee) => ({ type: "Employee", title: employee.displayName, subtitle: `${employee.employeeId || "—"} · ${employee.title || getRank(employee.rank).label}`, href: `#/staff/${employee.uid || employee.id}`, icon: initials(employee.displayName), search: `${employee.discordUsername || ""} ${getDepartment(employee.departmentId).name}` })) : [];
@@ -941,6 +1167,7 @@ async function renderRoute() {
   if (current === "/profile") return myProfilePage();
   if (segments[0] === "staff" && segments[1]) return staffProfilePage(decodeURIComponent(segments[1]));
   if (current === "/admin/staff") return staffAdminPage();
+  if (current === "/admin/discord") return discordIntegrationPage();
   if (EXTENSION_ROUTES.has(current)) return;
   return notFoundPage("Page not found", "The requested Cognitus Command route does not exist.");
 }
