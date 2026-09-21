@@ -1,5 +1,5 @@
 import { firebaseState, readDoc } from "./firebase.js";
-import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js?v=access-model-2";
+import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js?v=access-model-3";
 import { safe, lower, route } from "./utils.js";
 
 const MAIN_URL = "https://cognitus-solutions.org/";
