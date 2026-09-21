@@ -711,6 +711,7 @@ async function staffAdminPage() {
           <label>Position Title<input name="title" maxlength="100" placeholder="e.g. Customer Service Specialist" required></label>
           <label>Access Profile<select name="preset" required><option value="recommended">Recommended for rank + department</option><option value="staff">Standard Staff</option><option value="supervisor">Supervisor Foundation</option><option value="chief-public-relations">Chief Public Relations Officer</option><option value="chief-customer-service">Chief Customer Service Officer</option><option value="chief-financial-officer">Chief Financial Officer</option><option value="chief-human-resources">Chief Human Resources Officer</option><option value="chief-quality-assurance">Chief Quality Assurance Officer</option>${isExecutiveOwner() ? `<option value="co-owner">Co-Owner — Full Executive Access</option>` : ""}</select><span class="help-text">Recommended access uses least privilege: rank sets the baseline and department adds only the tools appropriate to that function.</span></label>
           <label>Status<select name="status"><option value="active">Active</option><option value="training">Training</option><option value="on_leave">On Leave</option></select></label>
+          <div class="notice" id="permission-preview"><strong>Access preview</strong><div class="permission-list" style="margin-top:10px"></div></div>
           <button class="button button-dark" type="submit">Provision Staff Access</button>
         </form>
       </section>
@@ -723,13 +724,32 @@ async function staffAdminPage() {
 
   const provisionForm = root.querySelector("#provision-form");
   provisionForm?.addEventListener("submit", provisionStaff);
+  const updatePermissionPreview = () => {
+    if (!provisionForm) return;
+    const rankValue = provisionForm.querySelector('[name="rank"]')?.value || "staff";
+    const departmentValue = provisionForm.querySelector('[name="departmentId"]')?.value || "";
+    const presetValue = provisionForm.querySelector('[name="preset"]')?.value || "recommended";
+    const preview = root.querySelector("#permission-preview .permission-list");
+    if (!preview) return;
+    const permissions = rankValue === "co-owner"
+      ? bundle("co-owner")
+      : presetValue === "recommended"
+        ? recommendedPermissions(rankValue, departmentValue)
+        : bundle(presetValue);
+    preview.innerHTML = permissions.map((permission) => `<span class="permission-chip">${safe(permissionLabel(permission))}</span>`).join("");
+  };
   provisionForm?.querySelector('[name="rank"]')?.addEventListener("change", (event) => {
-    if (event.currentTarget.value !== "co-owner") return;
-    const departmentSelect = provisionForm.querySelector('[name="departmentId"]');
-    const presetSelect = provisionForm.querySelector('[name="preset"]');
-    if (departmentSelect) departmentSelect.value = "executive-office";
-    if (presetSelect?.querySelector('option[value="co-owner"]')) presetSelect.value = "co-owner";
+    if (event.currentTarget.value === "co-owner") {
+      const departmentSelect = provisionForm.querySelector('[name="departmentId"]');
+      const presetSelect = provisionForm.querySelector('[name="preset"]');
+      if (departmentSelect) departmentSelect.value = "executive-office";
+      if (presetSelect?.querySelector('option[value="co-owner"]')) presetSelect.value = "co-owner";
+    }
+    updatePermissionPreview();
   });
+  provisionForm?.querySelector('[name="departmentId"]')?.addEventListener("change", updatePermissionPreview);
+  provisionForm?.querySelector('[name="preset"]')?.addEventListener("change", updatePermissionPreview);
+  updatePermissionPreview();
   root.querySelectorAll("[data-terminate-staff]").forEach((button) => button.addEventListener("click", () => openTerminationDialog(button.dataset.terminateStaff)));
   root.querySelectorAll("[data-add-termination-notice]").forEach((button) => button.addEventListener("click", () => openTerminationDialog(button.dataset.addTerminationNotice, true)));
   root.querySelector("[data-cancel-termination]")?.addEventListener("click", closeTerminationDialog);
