@@ -21,7 +21,7 @@ const state = {
 function owner() {
   return Boolean(state.userRecord?.status === "active" && (
     state.userRecord?.role === "owner"
-    || (isActiveStaff(state.staffAccess) && state.staffAccess?.rank === "co-owner")
+    || (isActiveStaff(state.staffAccess) && ["owner", "co-owner"].includes(state.staffAccess?.rank))
   ));
 }
 
@@ -73,6 +73,9 @@ function buildNavigation() {
   }
   if (owner() || canAny([PERMISSIONS.STAFF_PROVISION, PERMISSIONS.STAFF_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE])) {
     leadership.push(item("#/admin/staff", "Staff Administration", "SA", "Provision staff and manage staff access"));
+  }
+  if (owner() || canAny([PERMISSIONS.PERMISSIONS_MANAGE, PERMISSIONS.SYSTEM_MANAGE])) {
+    leadership.push(item("#/admin/discord", "Discord Integration", "DI", "Map Discord roles to Cognitus permissions and synchronize staff roles"));
   }
 
   const command = [];
