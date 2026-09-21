@@ -1,6 +1,6 @@
 import { initializeFirebase, firebaseState, readDoc, readCollection, readQuery, newFirestoreDoc, writeBatch } from "./firebase.js";
 import { DEPARTMENTS, RANKS, getDepartment, getRank } from "./config/departments.js";
-import { PERMISSIONS, PERMISSION_VALUES, bundle, effectivePermissions, hasPermission, hasAnyPermission, isActiveStaff } from "./config/permissions.js";
+import { PERMISSIONS, PERMISSION_VALUES, bundle, effectivePermissions, hasPermission, hasAnyPermission, isActiveStaff } from "./config/permissions.js?v=discord-role-sync-1";
 import {
   clean,
   lower,
