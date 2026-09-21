@@ -31,7 +31,7 @@ async function loadForRoute() {
   try {
     if (matches(current, G2_ROUTES)) {
       loadingSurface("staff workspace");
-      g2Promise ||= import("./generation2.js?v=20260912-v4-lazy");
+      g2Promise ||= import("./generation2.js?v=20260920-v5-discord-leave-role");
       await g2Promise;
       return;
     }
