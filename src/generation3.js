@@ -1,6 +1,6 @@
 import { firebaseState, readDoc, readCollection, readQuery, newFirestoreDoc } from "./firebase.js";
 import { DEPARTMENTS, getDepartment, getRank } from "./config/departments.js";
-import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js?v=access-model-2";
+import { PERMISSIONS, hasPermission, isActiveStaff } from "./config/permissions.js?v=access-model-3";
 import {
   clean,
   lower,
