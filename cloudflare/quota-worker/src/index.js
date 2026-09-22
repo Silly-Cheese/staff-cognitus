@@ -216,6 +216,10 @@ async function handleApi(request, env) {
   if (!auth.admin) return json({ error: "Quota Administration access required." }, 403);
 
   if (url.pathname === "/api/admin/staff" && request.method === "GET") return json(await adminPayload(env));
+  if (url.pathname === "/api/admin/gateway" && request.method === "GET") {
+    const gateway = env.QUOTA_GATEWAY.get(env.QUOTA_GATEWAY.idFromName("primary"));
+    return gateway.fetch("https://internal/status");
+  }
   if (url.pathname === "/api/admin/settings" && request.method === "GET") {
     const s = await getSettings(env);
     return json({ defaultRequiredMessages: Number(s.default_required_messages), periodType: s.period_type, anchorDate: s.anchor_date, timezone: s.timezone, staffRoleIds: parseIds(s.staff_role_ids_json), includedChannelIds: parseIds(s.included_channel_ids_json), excludedChannelIds: parseIds(s.excluded_channel_ids_json) });
@@ -235,6 +239,8 @@ async function handleApi(request, env) {
     await env.DB.prepare("UPDATE quota_settings SET default_required_messages=?,period_type=?,anchor_date=?,staff_role_ids_json=?,included_channel_ids_json=?,excluded_channel_ids_json=?,updated_at=?,updated_by_uid=? WHERE id=1")
       .bind(required, type, anchor, JSON.stringify(staffRoleIds), JSON.stringify(includedChannelIds), JSON.stringify(excludedChannelIds), new Date().toISOString(), auth.uid).run();
     await audit(env, auth.uid, "settings.update", null, { required, type, anchor, staffRoleIds, includedChannelIds, excludedChannelIds });
+    const gateway = env.QUOTA_GATEWAY.get(env.QUOTA_GATEWAY.idFromName("primary"));
+    await gateway.fetch("https://internal/connect", { method: "POST" }).catch(() => {});
     return json({ ok: true });
   }
   if (url.pathname === "/api/admin/roster-sync" && request.method === "POST") {
