@@ -160,7 +160,6 @@ function manageDialog(person, period) {
 async function renderAdmin() {
   const target = shell("Quota Administration", "Staff performance");
   try {
-    try { await syncRoster(); } catch (e) { console.warn("Quota roster auto-sync was incomplete", e); }
     const [data, settings] = await Promise.all([api("/api/admin/staff"), api("/api/admin/settings")]);
     target.innerHTML = adminMarkup(data, settings);
 
