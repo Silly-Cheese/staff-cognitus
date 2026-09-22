@@ -144,6 +144,9 @@ function adminMarkup(data, settings) {
       '<label>Default message quota<input name="defaultRequiredMessages" type="number" min="1" max="100000" value="' + Number(settings.defaultRequiredMessages || 100) + '" required></label>' +
       '<label>Period<select name="periodType"><option value="weekly"' + (settings.periodType === "weekly" ? " selected" : "") + '>Weekly</option><option value="biweekly"' + (settings.periodType === "biweekly" ? " selected" : "") + '>Biweekly</option><option value="monthly"' + (settings.periodType === "monthly" ? " selected" : "") + '>Monthly</option></select></label>' +
       '<label>Anchor date<input name="anchorDate" type="date" value="' + safe(settings.anchorDate || "2026-01-05") + '" required></label>' +
+      '<label>Staff Discord role IDs<textarea name="staffRoleIds" rows="3" required placeholder="Comma separated Discord role IDs">' + safe((settings.staffRoleIds || []).join(", ")) + '</textarea></label>' +
+      '<label>Included channel IDs <small>Optional — blank counts all channels except exclusions</small><textarea name="includedChannelIds" rows="2" placeholder="Comma separated">' + safe((settings.includedChannelIds || []).join(", ")) + '</textarea></label>' +
+      '<label>Excluded channel IDs <small>Optional</small><textarea name="excludedChannelIds" rows="2" placeholder="Comma separated">' + safe((settings.excludedChannelIds || []).join(", ")) + '</textarea></label>' +
       '<div class="button-row"><button type="button" class="button" data-close-settings>Cancel</button><button class="button button-dark" type="submit">Save Settings</button></div><div id="quota-settings-message"></div></form></dialog>';
 }
 function manageDialog(person, period) {
@@ -220,7 +223,11 @@ async function renderAdmin() {
     target.querySelector("#quota-settings-form")?.addEventListener("submit", async event => {
       event.preventDefault();
       const body = Object.fromEntries(new FormData(event.currentTarget).entries());
-      body.defaultRequiredMessages = Number(body.defaultRequiredMessages);\n      const ids = value => String(value || "").split(/[\\s,]+/).map(v => v.trim()).filter(Boolean);\n      body.staffRoleIds = ids(body.staffRoleIds);\n      body.includedChannelIds = ids(body.includedChannelIds);\n      body.excludedChannelIds = ids(body.excludedChannelIds);
+      body.defaultRequiredMessages = Number(body.defaultRequiredMessages);
+      const ids = value => String(value || "").split(/[\s,]+/).map(v => v.trim()).filter(Boolean);
+      body.staffRoleIds = ids(body.staffRoleIds);
+      body.includedChannelIds = ids(body.includedChannelIds);
+      body.excludedChannelIds = ids(body.excludedChannelIds);
       try { await api("/api/admin/settings", { method: "PUT", body }); location.reload(); }
       catch (error) { target.querySelector("#quota-settings-message").innerHTML = notice(error.message, "error"); }
     });
