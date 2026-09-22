@@ -1,7 +1,7 @@
 import { initializeFirebase, firebaseState, readCollection, readDoc } from "./firebase.js";
 import { route, safe, formatTimestamp, statusLabel } from "./utils.js";
 
-const API = "https://quota-api.cognitus-solutions.org";
+const API = "https://auth.cognitus-solutions.org";
 const root = document.querySelector("#page-root");
 let busy = false;
 
