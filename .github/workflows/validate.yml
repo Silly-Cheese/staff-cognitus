@@ -22,6 +22,8 @@ jobs:
           node --check src/extensions-loader-v4.js
           node --check src/command-v4.js
           node --check src/staff-system-v5.js
+          node --check src/quota-v1.js
+          node --check cloudflare/quota-worker/src/index.js
           node --check src/generation2.js
           node --check src/generation3.js
           node --check src/firebase.js
@@ -35,6 +37,8 @@ jobs:
           grep -q 'src/command-v4.js' index.html
           grep -q 'src/staff-system-v5.js' index.html
           grep -q 'staff-system-v5.css' index.html
+          grep -q 'quota-v1.css' index.html
+          grep -q 'src/quota-v1.js' index.html
           grep -q 'generation2.js' src/extensions-loader-v4.js
           grep -q 'generation3.js' src/extensions-loader-v4.js
           if grep -q 'src/portal-overhaul.js' index.html; then

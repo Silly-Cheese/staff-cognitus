@@ -142,7 +142,8 @@ const EXTENSION_ROUTES = new Set([
   "/department-command", "/quality", "/public-relations", "/customer-service",
   "/executive", "/executive/accounts", "/executive/approvals", "/executive/audit",
   "/operations-intelligence",
-  "/discipline", "/admin/discipline"
+  "/discipline", "/admin/discipline",
+  "/quota", "/admin/quota"
 ]);
 
 function setTitle(title) {

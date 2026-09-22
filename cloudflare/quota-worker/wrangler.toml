@@ -1,0 +1,24 @@
+name = "cognitus-quota-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "cognitus-solutions"
+DISCORD_GUILD_ID = "REPLACE_WITH_COGNITUS_GUILD_ID"
+ALLOWED_ORIGINS = "https://staff.cognitus-solutions.org,https://silly-cheese.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cognitus-quota"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[durable_objects.bindings]]
+name = "QUOTA_GATEWAY"
+class_name = "DiscordQuotaGateway"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DiscordQuotaGateway"]
+
+[triggers]
+crons = ["*/5 * * * *"]

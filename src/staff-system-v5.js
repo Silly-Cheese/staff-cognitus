@@ -77,6 +77,9 @@ function buildNavigation() {
   if (owner() || canAny([PERMISSIONS.PERMISSIONS_MANAGE, PERMISSIONS.SYSTEM_MANAGE])) {
     leadership.push(item("#/admin/discord", "Discord Integration", "DI", "Map Discord roles to Cognitus permissions and synchronize staff roles"));
   }
+  if (owner() || canAny([PERMISSIONS.STAFF_MANAGE, PERMISSIONS.STAFF_PRIVATE_READ, PERMISSIONS.HR_RECORDS_READ, PERMISSIONS.HR_RECORDS_MANAGE, PERMISSIONS.PERMISSIONS_MANAGE, PERMISSIONS.SYSTEM_MANAGE, PERMISSIONS.AUDIT_READ])) {
+    leadership.push(item("#/admin/quota", "Quota Administration", "QT", "Review and manage organization-wide Discord quotas"));
+  }
 
   const command = [];
   const commandAccess = owner() || canAny([
@@ -139,6 +142,7 @@ function buildNavigation() {
         item("#/discipline", "Write-Ups", "WU", "Your disciplinary records and appeal status"),
         item("#/leave", "Leave", "LV", "Time-away requests"),
         item("#/payroll", "Payroll", "PY", "Your payroll statements"),
+        item("#/quota", "My Quota", "QT", "Live Discord message quota progress"),
         item("#/dashboard?view=resources", "Resources Hub", "RS", "Combined employee resources")
       ]
     },
