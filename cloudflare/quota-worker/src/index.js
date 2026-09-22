@@ -228,7 +228,13 @@ async function handleApi(request, env) {
     if (!Number.isInteger(required) || required < 1 || required > 100000) return json({ error: "Quota must be 1-100000." }, 400);
     if (!["weekly","biweekly","monthly"].includes(type)) return json({ error: "Invalid period type." }, 400);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) return json({ error: "Invalid anchor date." }, 400);
-    const staffRoleIds = uniqueIds(body.staffRoleIds || []);\n    const includedChannelIds = uniqueIds(body.includedChannelIds || []);\n    const excludedChannelIds = uniqueIds(body.excludedChannelIds || []);\n    if (!staffRoleIds.length) return json({ error: "At least one staff Discord role ID is required." }, 400);\n    await env.DB.prepare("UPDATE quota_settings SET default_required_messages=?,period_type=?,anchor_date=?,staff_role_ids_json=?,included_channel_ids_json=?,excluded_channel_ids_json=?,updated_at=?,updated_by_uid=? WHERE id=1")\n      .bind(required, type, anchor, JSON.stringify(staffRoleIds), JSON.stringify(includedChannelIds), JSON.stringify(excludedChannelIds), new Date().toISOString(), auth.uid).run();\n    await audit(env, auth.uid, "settings.update", null, { required, type, anchor, staffRoleIds, includedChannelIds, excludedChannelIds });
+    const staffRoleIds = uniqueIds(body.staffRoleIds || []);
+    const includedChannelIds = uniqueIds(body.includedChannelIds || []);
+    const excludedChannelIds = uniqueIds(body.excludedChannelIds || []);
+    if (!staffRoleIds.length) return json({ error: "At least one staff Discord role ID is required." }, 400);
+    await env.DB.prepare("UPDATE quota_settings SET default_required_messages=?,period_type=?,anchor_date=?,staff_role_ids_json=?,included_channel_ids_json=?,excluded_channel_ids_json=?,updated_at=?,updated_by_uid=? WHERE id=1")
+      .bind(required, type, anchor, JSON.stringify(staffRoleIds), JSON.stringify(includedChannelIds), JSON.stringify(excludedChannelIds), new Date().toISOString(), auth.uid).run();
+    await audit(env, auth.uid, "settings.update", null, { required, type, anchor, staffRoleIds, includedChannelIds, excludedChannelIds });
     return json({ ok: true });
   }
   if (url.pathname === "/api/admin/roster-sync" && request.method === "POST") {
