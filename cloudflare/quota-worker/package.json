@@ -1,0 +1,14 @@
+{
+  "name": "cognitus-quota-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/index.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:apply": "wrangler d1 execute cognitus-quota --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
