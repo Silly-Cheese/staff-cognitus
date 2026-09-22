@@ -220,7 +220,7 @@ async function renderAdmin() {
     target.querySelector("#quota-settings-form")?.addEventListener("submit", async event => {
       event.preventDefault();
       const body = Object.fromEntries(new FormData(event.currentTarget).entries());
-      body.defaultRequiredMessages = Number(body.defaultRequiredMessages);
+      body.defaultRequiredMessages = Number(body.defaultRequiredMessages);\n      const ids = value => String(value || "").split(/[\\s,]+/).map(v => v.trim()).filter(Boolean);\n      body.staffRoleIds = ids(body.staffRoleIds);\n      body.includedChannelIds = ids(body.includedChannelIds);\n      body.excludedChannelIds = ids(body.excludedChannelIds);
       try { await api("/api/admin/settings", { method: "PUT", body }); location.reload(); }
       catch (error) { target.querySelector("#quota-settings-message").innerHTML = notice(error.message, "error"); }
     });
