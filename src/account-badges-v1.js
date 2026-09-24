@@ -76,6 +76,31 @@ function injectStyles() {
   document.head.appendChild(link);
 }
 
+function registryMarkersFor(uid) {
+  const items = state.assignments
+    .filter((item) => item.userUid === uid && activeAssignment(item))
+    .map((assignment) => ({ assignment, badge: badgeById(assignment.badgeId) }))
+    .filter((item) => item.badge && item.badge.active !== false)
+    .sort((a,b) => (b.assignment.featured === true ? 1 : 0) - (a.assignment.featured === true ? 1 : 0));
+  if (!items.length) return "";
+  const visible = items.slice(0,4).map((item) => '<span class="ab-registry-marker ab-accent-' + safe(item.badge.accent || "slate") + '" title="' + safe((item.badge.name || "Badge") + (item.badge.description ? " — " + item.badge.description : "")) + '">' + safe(item.badge.icon || "◆") + '</span>').join("");
+  return '<span class="ab-registry-markers" data-ab-registry-markers>' + visible + (items.length > 4 ? '<span class="ab-registry-more">+' + (items.length - 4) + '</span>' : '') + '</span>';
+}
+
+function augmentRegistryRows() {
+  if (route() !== "/executive/accounts" || !isManager()) return;
+  document.querySelectorAll(".registry-row").forEach((row) => {
+    if (row.querySelector("[data-ab-registry-markers]")) return;
+    const open = row.querySelector("[data-open-account]");
+    const name = row.querySelector(".registry-name");
+    const uid = open?.dataset?.openAccount;
+    if (!uid || !name) return;
+    const html = registryMarkersFor(uid);
+    if (!html) return;
+    name.insertAdjacentHTML("beforeend", html);
+  });
+}
+
 function augmentNav() {
   if (!sidebar || !isManager()) return;
   if (sidebar.querySelector("[data-account-badge-nav]")) return;
@@ -444,8 +469,12 @@ async function loadIdentity(user) {
 }
 
 function schedule() {
-  window.setTimeout(() => { augmentNav(); if (route() === BADGE_ROUTE) renderFresh(); }, 50);
-  window.setTimeout(augmentNav, 500);
+  window.setTimeout(() => {
+    augmentNav();
+    if (route() === BADGE_ROUTE) renderFresh();
+    if (route() === "/executive/accounts") augmentRegistryRows();
+  }, 50);
+  window.setTimeout(() => { augmentNav(); augmentRegistryRows(); }, 500);
 }
 
 async function init() {
@@ -459,6 +488,10 @@ async function init() {
   });
   window.addEventListener("hashchange", schedule);
   if (sidebar) new MutationObserver(augmentNav).observe(sidebar, {childList:true, subtree:true});
+  if (root) new MutationObserver(() => {
+    if (route() === "/executive/accounts") window.setTimeout(augmentRegistryRows, 20);
+    if (route() === BADGE_ROUTE && !root.querySelector("[data-account-badges-v1]")) window.setTimeout(render, 20);
+  }).observe(root, {childList:true, subtree:true});
 }
 
 init().catch((error) => console.warn("Account Badges V1 failed to initialize", error));
