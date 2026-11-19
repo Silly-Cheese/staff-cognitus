@@ -1,0 +1,23 @@
+exclude:
+  - .github
+  - FIRESTORE-RULES-STRATEGY.md
+  - README.md
+  - account-badges-v1.css
+  - closure
+  - cloudflare
+  - command-v4.css
+  - department-command-v2.css
+  - discipline-v1.css
+  - docs
+  - firestore.command.g2.rules.fragment
+  - firestore.command.g3.rules.fragment
+  - firestore.command.rules.fragment
+  - index.html
+  - login-hotfix.css
+  - operations-intelligence-v6.css
+  - portal-overhaul.css
+  - quota-v1.css
+  - scripts
+  - src
+  - staff-system-v5.css
+  - styles.css
