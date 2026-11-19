@@ -1,6 +1,8 @@
-name: Deploy Cognitus Staff to GitHub Pages
+name: Deploy Cognitus closure to GitHub Pages
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -10,23 +12,27 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Upload static site
+      - name: Prepare closure site
+        run: |
+          cp closure/index.html closure/404.html
+          if [ -f CNAME ]; then cp CNAME closure/CNAME; fi
+      - name: Upload closure site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: closure
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
